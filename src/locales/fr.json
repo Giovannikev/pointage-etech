@@ -1,0 +1,192 @@
+{
+  "common": {
+    "cancel": "Annuler",
+    "loading": "Chargement",
+    "tryAgain": "Réessayer",
+    "openSettings": "Ouvrir les paramètres",
+    "openInOdoo": "Ouvrir dans Odoo"
+  },
+  "app": {
+    "tagline": "Transformez vos commits GitHub en feuilles de temps Odoo.",
+    "misconfigured": "Pointage n'est pas configuré",
+    "logoutError": "Impossible de se déconnecter"
+  },
+  "language": {
+    "change": "Changer de langue"
+  },
+  "theme": {
+    "toggle": "Basculer le mode sombre",
+    "toggleHint": "Basculer le mode sombre (D)"
+  },
+  "nav": {
+    "timesheet": "Feuille de temps",
+    "settings": "Paramètres",
+    "odooInstances": "Instances Odoo",
+    "createGithubToken": "Créer un token GitHub",
+    "logOut": "Se déconnecter"
+  },
+  "auth": {
+    "signInTitle": "Connexion",
+    "signUpTitle": "Créer votre compte",
+    "email": "E-mail professionnel",
+    "password": "Mot de passe",
+    "passwordHint": "Au moins {{count}} caractères.",
+    "signIn": "Se connecter",
+    "createAccount": "Créer le compte",
+    "newHere": "Nouveau sur Pointage ?",
+    "createAnAccount": "Créer un compte",
+    "haveAccount": "Vous avez déjà un compte ?",
+    "checkInbox": "Consultez votre boîte de réception",
+    "confirmEmail": "Confirmez {{email}} pour finaliser la création de votre compte.",
+    "signInError": "Connexion impossible",
+    "signUpError": "Impossible de créer votre compte"
+  },
+  "settings": {
+    "title": "Connexions",
+    "description": "Votre token GitHub et vos clés API Odoo sont chiffrés avant d'être enregistrés, et ne sont jamais renvoyés à votre navigateur.",
+    "loadError": "Impossible de charger vos paramètres",
+    "save": "Enregistrer les paramètres",
+    "saved": "Paramètres enregistrés",
+    "savedDescription": "Vos identifiants ont été vérifiés et enregistrés chiffrés.",
+    "saveError": "Impossible d'enregistrer vos paramètres",
+    "storedSecret": "Enregistré. Laissez vide pour le conserver.",
+    "connected": "Connecté",
+    "showValue": "Afficher la valeur",
+    "hideValue": "Masquer la valeur",
+    "github": {
+      "title": "GitHub",
+      "description": "Vos commits sont lus avec un token d'accès personnel.",
+      "connectedAs": "Connecté en tant que {{login}}",
+      "token": "Token d'accès personnel",
+      "tokenHint": "Token classique avec le scope <code>repo</code>, ou token fine-grained avec un accès en lecture à Contents et Metadata.",
+      "otherEmails": "Autres e-mails de commit",
+      "otherEmailsHint": "Facultatif. Ajoutez l'e-mail de votre configuration Git locale s'il n'est pas lié à votre compte GitHub, séparé par des virgules."
+    },
+    "odoo": {
+      "title": "Instance Odoo {{index}}",
+      "descriptionPrimary": "Les tâches sont d'abord cherchées ici.",
+      "descriptionSecondary": "Facultatif. Utilisée quand une tâche n'est pas trouvée dans l'instance 1.",
+      "name": "Nom",
+      "url": "URL",
+      "database": "Base de données",
+      "databasePlaceholder": "Détectée si vide",
+      "login": "Identifiant",
+      "apiKey": "Clé API",
+      "apiKeyHint": "Dans Odoo : Préférences, Sécurité du compte, Nouvelle clé API. Un mot de passe fonctionne aussi si la double authentification est désactivée."
+    }
+  },
+  "setup": {
+    "title": "Connectez vos comptes",
+    "description": "Pointage lit vos commits avec votre token GitHub et enregistre vos feuilles de temps avec votre identifiant et votre clé API Odoo."
+  },
+  "period": {
+    "label": "Période",
+    "today": "Aujourd'hui",
+    "thisWeek": "Cette semaine",
+    "lastWeek": "Semaine dernière",
+    "thisMonth": "Ce mois-ci",
+    "pickMonth": "Choisir un mois",
+    "previousYear": "Année précédente",
+    "nextYear": "Année suivante",
+    "rangeLabel": "Période : {{range}}",
+    "pickFirstDay": "Choisissez le premier jour, puis le dernier.",
+    "pickLastDay": "Choisissez maintenant le dernier jour.",
+    "tooLong": "La période ne peut pas dépasser un an."
+  },
+  "timesheet": {
+    "subtitle": "Vos commits de la période deviennent des lignes de feuille de temps, rattachées à leur tâche Odoo.",
+    "pasteCommits": "Coller des commits",
+    "fetchCommits": "Récupérer les commits",
+    "emptyTitle": "Aucune ligne pour l'instant",
+    "emptyDescription": "Récupérez vos commits GitHub de la période, ou collez-les. Chacun devient une ligne de feuille de temps, rattachée à sa tâche Odoo grâce à la référence du message.",
+    "columns": {
+      "date": "Date",
+      "instance": "Instance",
+      "project": "Projet",
+      "task": "Tâche",
+      "description": "Description",
+      "hours": "Heures",
+      "status": "Statut",
+      "actions": "Actions"
+    },
+    "noReference": "Aucune référence",
+    "notFound": "Introuvable",
+    "showDetails": "{{name}} (voir le détail)",
+    "loggedThatDay": "{{hours}} déjà pointées ce jour",
+    "loggedThatDayHint": "Vous avez déjà pointé du temps sur cette tâche ce jour-là dans Odoo. Vérifiez avant d'envoyer.",
+    "descriptionPlaceholder": "Décrivez le travail effectué",
+    "descriptionFor": "Description de {{line}}",
+    "hoursFor": "Heures de {{line}}",
+    "checkAgain": "Revérifier la tâche",
+    "submitLine": "Envoyer cette ligne",
+    "removeLine": "Supprimer la ligne",
+    "removeLoggedLine": "Retirer de la liste (reste dans Odoo)"
+  },
+  "status": {
+    "pending": "En attente",
+    "found": "Trouvée",
+    "missing": "Manquante",
+    "logged": "Déjà pointée",
+    "submitted": "Envoyée",
+    "error": "Erreur",
+    "submitting": "Envoi",
+    "noTaskReference": "Le message du commit ne contient pas de référence de tâche.",
+    "taskNotFound": "La tâche {{taskRef}} est introuvable dans vos instances Odoo.",
+    "alreadyLogged": "Cette ligne existe déjà dans Odoo avec la même description.",
+    "noOdooResult": "Odoo n'a renvoyé aucun résultat pour cette ligne."
+  },
+  "hoursMeter": {
+    "label": "Heures pointées",
+    "left": "Il reste {{remaining}} sur {{target}}",
+    "reached": "Toutes les heures attendues sont pointées",
+    "over": "{{over}} de plus que {{target}}",
+    "valueText": "{{logged}} sur {{target}}",
+    "submitAll": "Envoyer toutes les lignes"
+  },
+  "taskDetails": {
+    "loading": "Chargement de la description",
+    "empty": "Cette tâche n'a pas de description."
+  },
+  "pasteDialog": {
+    "title": "Coller des commits",
+    "description": "Un commit par ligne, ou la sortie de <code>git log</code>. Les commits de merge et les doublons sont ignorés.",
+    "messages": "Messages de commit",
+    "noneDetected": "Aucun commit détecté pour l'instant.",
+    "detected_one": "{{count}} commit détecté.",
+    "detected_other": "{{count}} commits détectés.",
+    "withoutReference_one": "{{count}} sans référence de tâche.",
+    "withoutReference_other": "{{count}} sans référence de tâche.",
+    "date": "Date de la feuille de temps",
+    "import": "Importer les commits",
+    "importCount_one": "Importer {{count}} commit",
+    "importCount_other": "Importer {{count}} commits"
+  },
+  "notifications": {
+    "fetchError": "Impossible de récupérer vos commits GitHub",
+    "pasteInstead": "Coller à la place",
+    "foundInOdoo_one": "{{count}} trouvée dans Odoo",
+    "foundInOdoo_other": "{{count}} trouvées dans Odoo",
+    "alreadyLogged_one": "{{count}} déjà pointée",
+    "alreadyLogged_other": "{{count}} déjà pointées",
+    "missing_one": "{{count}} manquante",
+    "missing_other": "{{count}} manquantes",
+    "checkError": "Impossible de vérifier les tâches dans Odoo",
+    "taskNotFound": "Tâche introuvable",
+    "taskNotFoundHint": "Vérifiez la référence, ou que vous avez accès à la tâche.",
+    "taskFound": "Tâche trouvée",
+    "alreadyImported": "Déjà importés",
+    "nothingToImport": "Aucun commit à importer",
+    "alreadyInList_one": "{{count}} commit est déjà dans la liste.",
+    "alreadyInList_other": "{{count}} commits sont déjà dans la liste.",
+    "skippedHint": "Les commits de merge et les lignes vides sont ignorés.",
+    "duplicatesSkipped_one": "{{count}} doublon ignoré.",
+    "duplicatesSkipped_other": "{{count}} doublons ignorés.",
+    "imported_one": "{{count}} commit importé",
+    "imported_other": "{{count}} commits importés",
+    "submitted_one": "{{count}} ligne envoyée dans Odoo",
+    "submitted_other": "{{count}} lignes envoyées dans Odoo",
+    "partlySubmitted": "{{submitted}} envoyées, {{failed}} en échec",
+    "submitError_one": "Impossible d'envoyer {{count}} ligne",
+    "submitError_other": "Impossible d'envoyer {{count}} lignes"
+  }
+}

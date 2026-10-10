@@ -1,0 +1,192 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "loading": "Loading",
+    "tryAgain": "Try again",
+    "openSettings": "Open settings",
+    "openInOdoo": "Open in Odoo"
+  },
+  "app": {
+    "tagline": "Turn your GitHub commits into Odoo timesheets.",
+    "misconfigured": "Pointage isn't configured",
+    "logoutError": "Couldn't log out"
+  },
+  "language": {
+    "change": "Change language"
+  },
+  "theme": {
+    "toggle": "Toggle dark mode",
+    "toggleHint": "Toggle dark mode (D)"
+  },
+  "nav": {
+    "timesheet": "Timesheet",
+    "settings": "Settings",
+    "odooInstances": "Odoo instances",
+    "createGithubToken": "Create a GitHub token",
+    "logOut": "Log out"
+  },
+  "auth": {
+    "signInTitle": "Sign in",
+    "signUpTitle": "Create your account",
+    "email": "Work email",
+    "password": "Password",
+    "passwordHint": "At least {{count}} characters.",
+    "signIn": "Sign in",
+    "createAccount": "Create account",
+    "newHere": "New to Pointage?",
+    "createAnAccount": "Create an account",
+    "haveAccount": "Already have an account?",
+    "checkInbox": "Check your inbox",
+    "confirmEmail": "Confirm {{email}} to finish creating your account.",
+    "signInError": "Couldn't sign in",
+    "signUpError": "Couldn't create your account"
+  },
+  "settings": {
+    "title": "Connections",
+    "description": "Your GitHub token and Odoo API keys are encrypted before they're stored, and never sent back to your browser.",
+    "loadError": "Couldn't load your settings",
+    "save": "Save settings",
+    "saved": "Settings saved",
+    "savedDescription": "Your credentials were checked and stored encrypted.",
+    "saveError": "Couldn't save your settings",
+    "storedSecret": "Saved. Leave empty to keep it.",
+    "connected": "Connected",
+    "showValue": "Show value",
+    "hideValue": "Hide value",
+    "github": {
+      "title": "GitHub",
+      "description": "Your commits are read with a personal access token.",
+      "connectedAs": "Connected as {{login}}",
+      "token": "Personal access token",
+      "tokenHint": "Classic token with the <code>repo</code> scope, or a fine-grained token with read access to Contents and Metadata.",
+      "otherEmails": "Other commit emails",
+      "otherEmailsHint": "Optional. Add the email of your local Git config when it isn't linked to your GitHub account, separated by commas."
+    },
+    "odoo": {
+      "title": "Odoo instance {{index}}",
+      "descriptionPrimary": "Tasks are looked up here first.",
+      "descriptionSecondary": "Optional. Searched when a task isn't found in instance 1.",
+      "name": "Name",
+      "url": "URL",
+      "database": "Database",
+      "databasePlaceholder": "Detected when empty",
+      "login": "Login",
+      "apiKey": "API key",
+      "apiKeyHint": "In Odoo: Preferences, Account Security, New API Key. A password also works when two-factor authentication is off."
+    }
+  },
+  "setup": {
+    "title": "Connect your accounts",
+    "description": "Pointage reads your commits with your GitHub token and logs your timesheets with your Odoo login and API key."
+  },
+  "period": {
+    "label": "Period",
+    "today": "Today",
+    "thisWeek": "This week",
+    "lastWeek": "Last week",
+    "thisMonth": "This month",
+    "pickMonth": "Pick a month",
+    "previousYear": "Previous year",
+    "nextYear": "Next year",
+    "rangeLabel": "Period: {{range}}",
+    "pickFirstDay": "Pick the first day, then the last day.",
+    "pickLastDay": "Now pick the last day.",
+    "tooLong": "The period can't be longer than a year."
+  },
+  "timesheet": {
+    "subtitle": "Your commits of the period become timesheet lines, matched to their Odoo task.",
+    "pasteCommits": "Paste commits",
+    "fetchCommits": "Fetch commits",
+    "emptyTitle": "No timesheet lines yet",
+    "emptyDescription": "Fetch your GitHub commits for the period, or paste them. Each one becomes a timesheet line, matched to its Odoo task through the reference in the message.",
+    "columns": {
+      "date": "Date",
+      "instance": "Instance",
+      "project": "Project",
+      "task": "Task",
+      "description": "Description",
+      "hours": "Hours",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "noReference": "No reference",
+    "notFound": "Not found",
+    "showDetails": "{{name}} (show details)",
+    "loggedThatDay": "{{hours}} already logged that day",
+    "loggedThatDayHint": "You already logged time on this task that day in Odoo. Check before submitting.",
+    "descriptionPlaceholder": "Describe the work done",
+    "descriptionFor": "Description for {{line}}",
+    "hoursFor": "Hours for {{line}}",
+    "checkAgain": "Check task again",
+    "submitLine": "Submit this line",
+    "removeLine": "Remove line",
+    "removeLoggedLine": "Remove from list (stays in Odoo)"
+  },
+  "status": {
+    "pending": "Pending",
+    "found": "Found",
+    "missing": "Missing",
+    "logged": "Already logged",
+    "submitted": "Submitted",
+    "error": "Error",
+    "submitting": "Submitting",
+    "noTaskReference": "The commit message has no task reference.",
+    "taskNotFound": "Task {{taskRef}} wasn't found in your Odoo instances.",
+    "alreadyLogged": "This line is already in Odoo with the same description.",
+    "noOdooResult": "Odoo didn't return a result for this line."
+  },
+  "hoursMeter": {
+    "label": "Hours logged",
+    "left": "{{remaining}} left of {{target}}",
+    "reached": "All expected hours logged",
+    "over": "{{over}} over {{target}}",
+    "valueText": "{{logged}} of {{target}}",
+    "submitAll": "Submit all timesheets"
+  },
+  "taskDetails": {
+    "loading": "Loading the description",
+    "empty": "This task has no description."
+  },
+  "pasteDialog": {
+    "title": "Paste commits",
+    "description": "One commit per line, or the output of <code>git log</code>. Merge commits and duplicates are skipped.",
+    "messages": "Commit messages",
+    "noneDetected": "No commits detected yet.",
+    "detected_one": "{{count}} commit detected.",
+    "detected_other": "{{count}} commits detected.",
+    "withoutReference_one": "{{count}} without a task reference.",
+    "withoutReference_other": "{{count}} without a task reference.",
+    "date": "Timesheet date",
+    "import": "Import commits",
+    "importCount_one": "Import {{count}} commit",
+    "importCount_other": "Import {{count}} commits"
+  },
+  "notifications": {
+    "fetchError": "Couldn't fetch your commits from GitHub",
+    "pasteInstead": "Paste instead",
+    "foundInOdoo_one": "{{count}} found in Odoo",
+    "foundInOdoo_other": "{{count}} found in Odoo",
+    "alreadyLogged_one": "{{count}} already logged",
+    "alreadyLogged_other": "{{count}} already logged",
+    "missing_one": "{{count}} missing",
+    "missing_other": "{{count}} missing",
+    "checkError": "Couldn't check tasks in Odoo",
+    "taskNotFound": "Task not found",
+    "taskNotFoundHint": "Check the reference, or that you have access to the task.",
+    "taskFound": "Task found",
+    "alreadyImported": "Already imported",
+    "nothingToImport": "No commits to import",
+    "alreadyInList_one": "{{count}} commit already in the list.",
+    "alreadyInList_other": "{{count}} commits already in the list.",
+    "skippedHint": "Merge commits and empty lines are skipped.",
+    "duplicatesSkipped_one": "{{count}} duplicate skipped.",
+    "duplicatesSkipped_other": "{{count}} duplicates skipped.",
+    "imported_one": "Imported {{count}} commit",
+    "imported_other": "Imported {{count}} commits",
+    "submitted_one": "{{count}} timesheet submitted to Odoo",
+    "submitted_other": "{{count}} timesheets submitted to Odoo",
+    "partlySubmitted": "{{submitted}} submitted, {{failed}} failed",
+    "submitError_one": "Couldn't submit {{count}} timesheet",
+    "submitError_other": "Couldn't submit {{count}} timesheets"
+  }
+}
