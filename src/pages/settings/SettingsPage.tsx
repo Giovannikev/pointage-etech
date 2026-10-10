@@ -7,9 +7,9 @@ export function SettingsPage() {
   const { t } = useTranslation()
 
   return (
-    <main className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-8 sm:px-6">
+    <main className="mx-auto grid w-full max-w-3xl gap-6 px-4 py-6 sm:px-6 sm:py-8">
       <div className="grid gap-1">
-        <h2 className="text-2xl font-semibold tracking-tight">
+        <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
           {t("settings.title")}
         </h2>
         <p className="text-sm text-muted-foreground">

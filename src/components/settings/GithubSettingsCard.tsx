@@ -42,8 +42,10 @@ export function GithubSettingsCard({
         <CardDescription>{t("settings.github.description")}</CardDescription>
         {stored !== null && (
           <CardAction>
-            <Badge variant="secondary">
-              {t("settings.github.connectedAs", { login: stored.login })}
+            <Badge variant="secondary" className="max-w-44 sm:max-w-none">
+              <span className="truncate">
+                {t("settings.github.connectedAs", { login: stored.login })}
+              </span>
             </Badge>
           </CardAction>
         )}

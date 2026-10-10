@@ -110,6 +110,11 @@ export function findPreset(
   return match ?? null
 }
 
+/** True when the ISO date falls within the period, both ends included. */
+export function isInPeriod(isoDate: string, period: CommitPeriod): boolean {
+  return isoDate >= period.from && isoDate <= period.to
+}
+
 export function isValidPeriod(period: CommitPeriod): boolean {
   if (!isIsoDate(period.from) || !isIsoDate(period.to)) {
     return false

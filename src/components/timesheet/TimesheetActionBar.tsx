@@ -107,9 +107,9 @@ export function TimesheetActionBar({
 
   return (
     <div className="sticky bottom-0 z-40 mt-auto border-t bg-background/85 backdrop-blur-md">
-      <div className="flex flex-wrap items-center gap-4 px-4 py-3 sm:flex-nowrap sm:px-6 lg:px-8">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 px-4 py-3 sm:flex-nowrap sm:px-6 lg:px-8">
         <HoursMeter entries={entries} totalHours={totalHours} />
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3 max-sm:w-full">
           <ul className="hidden items-center gap-3 text-xs text-muted-foreground md:flex">
             {instances.map((instance) => (
               <li key={instance.index} className="flex items-center gap-1.5">
@@ -126,6 +126,7 @@ export function TimesheetActionBar({
           </ul>
           <Button
             size="lg"
+            className="max-sm:flex-1"
             disabled={submittableCount === 0 || isSubmitting}
             onClick={onSubmitAll}
           >

@@ -6,7 +6,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@/components/ui/sidebar"
 import type { AppView } from "@/types/navigation"
 
@@ -22,14 +21,11 @@ interface NavMainProps {
   onNavigate: (view: AppView) => void
 }
 
+/** The current page stands out: inverted colors, like the logo. */
+const ACTIVE_ITEM =
+  "data-active:bg-sidebar-foreground/15 data-active:text-sidebar-foreground data-active:font-semibold"
+
 export function NavMain({ items, activeView, onNavigate }: NavMainProps) {
-  const { setOpenMobile } = useSidebar()
-
-  const navigate = (view: AppView): void => {
-    onNavigate(view)
-    setOpenMobile(false)
-  }
-
   return (
     <SidebarGroup>
       <SidebarGroupContent>
@@ -39,7 +35,8 @@ export function NavMain({ items, activeView, onNavigate }: NavMainProps) {
               <SidebarMenuButton
                 tooltip={item.title}
                 isActive={item.view === activeView}
-                onClick={() => navigate(item.view)}
+                className={ACTIVE_ITEM}
+                onClick={() => onNavigate(item.view)}
               >
                 <item.icon />
                 <span>{item.title}</span>

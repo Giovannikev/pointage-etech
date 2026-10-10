@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react"
+import { useState, type CSSProperties, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 
 import { AppSidebar } from "@/components/dashboard/appSidebar"
@@ -10,6 +10,14 @@ const VIEW_TITLE_KEYS = {
   timesheet: "nav.timesheet",
   settings: "nav.settings",
 } as const satisfies Record<AppView, string>
+
+/** Cookie the shadcn sidebar writes on every toggle (components/ui/sidebar.tsx). */
+const SIDEBAR_COOKIE = "sidebar_state"
+
+/** Reopens the sidebar as the user left it, expanded or collapsed. */
+function readSidebarOpen(): boolean {
+  return !document.cookie.split("; ").includes(`${SIDEBAR_COOKIE}=false`)
+}
 
 interface DashboardLayoutProps {
   activeView: AppView
@@ -27,9 +35,11 @@ export function DashboardLayout({
   children,
 }: DashboardLayoutProps) {
   const { t } = useTranslation()
+  const [defaultOpen] = useState(readSidebarOpen)
 
   return (
     <SidebarProvider
+      defaultOpen={defaultOpen}
       style={
         {
           "--sidebar-width": "calc(var(--spacing) * 64)",
@@ -44,7 +54,9 @@ export function DashboardLayout({
         userEmail={userEmail}
         onSignOut={onSignOut}
       />
-      <SidebarInset>
+      {/* min-w-0 lets the page shrink while the sidebar expands, instead of
+          overflowing the window during the animation. */}
+      <SidebarInset className="min-w-0">
         <SiteHeader title={t(VIEW_TITLE_KEYS[activeView])} />
         <div className="flex flex-1 flex-col">{children}</div>
       </SidebarInset>

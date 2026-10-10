@@ -10,6 +10,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useFormatters } from "@/hooks/useFormatters"
 import { CALENDAR_LOCALES } from "@/lib/calendarLocales"
 import type { CommitPeriod } from "@/types/timesheet"
@@ -32,7 +33,7 @@ interface DateRangePickerProps {
   invalid: boolean
 }
 
-/** Two-month calendar: the first click starts the range, the second ends and applies it. */
+/** Calendar (two months, one on phones): the first click starts the range, the second ends and applies it. */
 export function DateRangePicker({
   value,
   onChange,
@@ -41,6 +42,7 @@ export function DateRangePicker({
 }: DateRangePickerProps) {
   const { t } = useTranslation()
   const { language, formatMediumDate } = useFormatters()
+  const isMobile = useIsMobile()
   const [isOpen, setIsOpen] = useState(false)
   const [draft, setDraft] = useState<DraftRange>(() => toDraft(value))
 
@@ -83,7 +85,7 @@ export function DateRangePicker({
       <PopoverContent align="start" className="w-auto p-0">
         <Calendar
           mode="range"
-          numberOfMonths={2}
+          numberOfMonths={isMobile ? 1 : 2}
           weekStartsOn={1}
           locale={CALENDAR_LOCALES[language]}
           defaultMonth={draft.from}

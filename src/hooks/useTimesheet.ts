@@ -25,7 +25,8 @@ import {
   reconcileWithOdoo,
   type OdooReconciliation,
 } from "@/utils/odooReconciliation"
-import { getPresetPeriod } from "@/utils/period"
+import { getPresetPeriod, isInPeriod } from "@/utils/period"
+import { describeCommit } from "@/utils/timesheetDescription"
 import {
   canVerify,
   isEditable,
@@ -43,20 +44,26 @@ interface DatedCommit {
   date: string
 }
 
+interface TaskMatch {
+  entry: TimesheetEntry
+  task: OdooTaskMatch | null
+  /** Description to keep once verified: regenerated unless the user edited it. */
+  description: string
+}
+
+type VerifiedEntry = TaskMatch & { task: OdooTaskMatch }
+
 interface TaskResolution {
   id: string
   task: OdooTaskMatch | null
+  description: string
   reconciliation: OdooReconciliation
-}
-
-interface VerifiedEntry {
-  entry: TimesheetEntry
-  task: OdooTaskMatch
 }
 
 type TimesheetAction =
   | { type: "entriesAdded"; entries: TimesheetEntry[] }
   | { type: "entryRemoved"; id: string }
+  | { type: "periodApplied"; period: CommitPeriod }
   | { type: "descriptionChanged"; id: string; description: string }
   | { type: "hoursChanged"; id: string; hours: number }
   | { type: "verificationStarted"; ids: string[] }
@@ -77,7 +84,9 @@ function updateWhere(
 /** Editing a line that failed to submit puts it back in the "found" state. */
 function applyEdit(
   entry: TimesheetEntry,
-  patch: Partial<Pick<TimesheetEntry, "description" | "hours">>
+  patch: Partial<
+    Pick<TimesheetEntry, "description" | "isDescriptionEdited" | "hours">
+  >
 ): TimesheetEntry {
   if (!isEditable(entry)) {
     return entry
@@ -91,9 +100,9 @@ function applyEdit(
 
 function resolveVerification(
   entry: TimesheetEntry,
-  { task, reconciliation }: TaskResolution
+  { task, description, reconciliation }: TaskResolution
 ): TimesheetEntry {
-  const base = { ...entry, activity: "idle" as const, task }
+  const base = { ...entry, activity: "idle" as const, task, description }
   if (task === null) {
     return {
       ...base,
@@ -162,9 +171,19 @@ function timesheetReducer(
         (entry) => entry.id !== action.id || entry.activity !== "idle"
       )
 
+    case "periodApplied":
+      // Lines of other days leave the list; those being sent stay until done.
+      return entries.filter(
+        (entry) =>
+          isInPeriod(entry.date, action.period) || entry.activity !== "idle"
+      )
+
     case "descriptionChanged":
       return updateWhere(entries, new Set([action.id]), (entry) =>
-        applyEdit(entry, { description: action.description })
+        applyEdit(entry, {
+          description: action.description,
+          isDescriptionEdited: true,
+        })
       )
 
     case "hoursChanged":
@@ -232,7 +251,8 @@ function createEntry({ commit, date }: DatedCommit): TimesheetEntry {
   return {
     id: crypto.randomUUID(),
     commit,
-    description: commit.formattedDescription,
+    description: describeCommit(commit, null),
+    isDescriptionEdited: false,
     hours: DEFAULT_HOURS,
     date,
     status: hasTaskRef ? "pending" : "missing",
@@ -273,9 +293,9 @@ async function reconcile(
 ): Promise<Map<string, OdooReconciliation>> {
   const timesheets = await findLoggedTimesheets(verified.map(toLookup))
   return reconcileWithOdoo(
-    verified.map(({ entry, task }) => ({
+    verified.map(({ entry, task, description }) => ({
       id: entry.id,
-      description: entry.description,
+      description,
       date: entry.date,
       task,
     })),
@@ -313,6 +333,7 @@ export interface UseTimesheetResult {
   isImporting: boolean
   isSubmitting: boolean
   importFromText: (raw: string, date: string) => Promise<ImportSummary>
+  /** Fetches the period's commits; lines of other days leave the list. */
   importFromGithub: () => Promise<ImportSummary>
   verifyEntry: (id: string) => Promise<VerificationSummary>
   updateDescription: (id: string, description: string) => void
@@ -348,18 +369,24 @@ export function useTimesheet(): UseTimesheetResult {
         const taskRefs = [...new Set(verifiable.map((e) => e.commit.taskRef))]
         const results = await searchTasks(taskRefs)
         const byRef = new Map(results.map((result) => [result.taskRef, result]))
-        const matches: { entry: TimesheetEntry; task: OdooTaskMatch | null }[] =
-          verifiable.map((entry) => ({
+        const matches = verifiable.map((entry): TaskMatch => {
+          const task = toTaskMatch(byRef.get(entry.commit.taskRef))
+          return {
             entry,
-            task: toTaskMatch(byRef.get(entry.commit.taskRef)),
-          }))
+            task,
+            description: entry.isDescriptionEdited
+              ? entry.description
+              : describeCommit(entry.commit, task),
+          }
+        })
         const verified = matches.filter(
           (match): match is VerifiedEntry => match.task !== null
         )
         const reconciliations = await reconcile(verified)
-        const resolutions = matches.map(({ entry, task }) => ({
+        const resolutions = matches.map(({ entry, task, description }) => ({
           id: entry.id,
           task,
+          description,
           reconciliation: reconciliations.get(entry.id) ?? NOT_LOGGED,
         }))
         dispatch({ type: "verificationResolved", resolutions })
@@ -425,6 +452,9 @@ export function useTimesheet(): UseTimesheetResult {
     setIsImporting(true)
     try {
       const rawCommits = await fetchCommits(period)
+      // The list now shows the fetched period. Lines already in it for these
+      // days are kept with their edits; the fetched duplicates are skipped.
+      dispatch({ type: "periodApplied", period })
       const dated = rawCommits.flatMap(({ message, date }) => {
         const commit = parseCommitMessage(message)
         return commit === null ? [] : [{ commit, date }]

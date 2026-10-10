@@ -212,29 +212,18 @@ export function translateToFrench(text: string): string {
   )
 }
 
-/** Builds the French timesheet description from the parsed commit parts. */
-export function formatFrenchDescription(
+/** French action followed by the translated object, e.g. "Ajout de la fonction export". */
+function formatFrenchSummary(
   action: CommitAction | null,
-  object: string,
-  moduleName: string | null
+  object: string
 ): string {
   const translatedObject = translateToFrench(object)
 
-  let description: string
-  if (action !== null) {
-    const prefix = FRENCH_ACTION_PREFIXES[action]
-    description =
-      translatedObject === "" ? prefix : joinFrench(prefix, translatedObject)
-  } else {
-    description = capitalize(translatedObject)
+  if (action === null) {
+    return capitalize(translatedObject)
   }
-
-  if (description === "") {
-    return ""
-  }
-  return moduleName === null
-    ? description
-    : `${description} pour le module ${moduleName}`
+  const prefix = FRENCH_ACTION_PREFIXES[action]
+  return translatedObject === "" ? prefix : joinFrench(prefix, translatedObject)
 }
 
 function firstNonEmptyLine(message: string): string {
@@ -341,7 +330,7 @@ export function parseCommitMessage(message: string): ParsedCommit | null {
     moduleName,
     action,
     rawDescription,
-    formattedDescription: formatFrenchDescription(action, object, moduleName),
+    frenchSummary: formatFrenchSummary(action, object),
   }
 }
 

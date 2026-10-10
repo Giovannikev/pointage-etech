@@ -45,21 +45,23 @@ export function CommitPeriodPicker({
   return (
     <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          aria-label={t("period.label")}
-          value={findPreset(value) ?? ""}
-          onValueChange={selectPreset}
-          disabled={disabled}
-        >
-          {PERIOD_PRESETS.map((preset) => (
-            <ToggleGroupItem key={preset} value={preset}>
-              {t(`period.${preset}`)}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+        <div className="max-w-full overflow-x-auto">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label={t("period.label")}
+            value={findPreset(value) ?? ""}
+            onValueChange={selectPreset}
+            disabled={disabled}
+          >
+            {PERIOD_PRESETS.map((preset) => (
+              <ToggleGroupItem key={preset} value={preset}>
+                {t(`period.${preset}`)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </div>
         <MonthPicker
           value={findMonth(value)}
           onChange={selectMonth}

@@ -174,7 +174,9 @@ storing it. Leaving a secret field empty keeps the stored value.
 
 1. **Pick a period**: _Today_, _This week_, _Last week_, _This month_, a
    month, or a date range (first click, then last click).
-2. **Fetch commits** reads your commits from GitHub. **Paste commits** accepts
+2. **Fetch commits** reads your commits from GitHub and replaces the list with
+   the lines of that period (lines already listed for those days keep their
+   edits). **Paste commits** accepts
    messages or `git log` output for a given day. Merge commits and duplicates
    are skipped.
 3. Each line is matched to its Odoo task. Statuses:
@@ -213,13 +215,21 @@ Odoo, a task matches when its name contains the reference as a whole token:
 `[03-500] Sale order reference` matches `03-500`, but not `103-500` or
 `03-5001`.
 
-The description sent to Odoo is French whatever the interface language. Odoo
-tags (`[ADD]`, `[FIX]`, `[IMP]`...) and Conventional Commits types become a
-French action ("Ajout de la fonction", "Correction du problème"...), the
-module name is kept, and common Odoo terms are translated through
-`src/utils/frenchGlossary.ts`. The rest of the message is translated only when
-every term is in the glossary; otherwise it is kept as written after the
-French action. The description stays editable before submitting.
+The description sent to Odoo is French whatever the interface language:
+
+```
+Ajout de la fonction conditional product archiving and barcode release dans le
+module matelec_product_archive pour l'Archivage produit conditionné et
+suppression des codes-barres
+```
+
+Odoo tags (`[ADD]`, `[FIX]`, `[IMP]`...) and Conventional Commits types become
+a French action ("Ajout de la fonction", "Correction du problème"...), followed
+by the commit object, the module, and the title of the Odoo task once it is
+found (without its reference, with a French article guessed from its first
+word). Common Odoo terms are translated through `src/utils/frenchGlossary.ts`;
+the object is translated only when every term is in the glossary, otherwise
+it is kept as written. A description edited by hand is never regenerated.
 
 ## Security model
 

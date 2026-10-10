@@ -164,7 +164,7 @@ export function TimesheetPage({
     <>
       <div className="grid gap-4">
         <div className="grid gap-1">
-          <h2 className="text-2xl font-semibold tracking-tight">
+          <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {formatPeriod(timesheet.period)}
           </h2>
           <p className="text-sm text-muted-foreground">
@@ -177,7 +177,7 @@ export function TimesheetPage({
             onChange={timesheet.setPeriod}
             disabled={timesheet.isImporting}
           />
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 max-sm:w-full *:max-sm:flex-1">
             <Button variant="outline" onClick={openImportModal}>
               <ClipboardPasteIcon />
               {t("timesheet.pasteCommits")}
@@ -216,7 +216,7 @@ export function TimesheetPage({
 
   return (
     <>
-      <main className="grid w-full content-start gap-6 px-4 py-8 sm:px-6 lg:px-8">
+      <main className="grid w-full min-w-0 content-start gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
         <SettingsGate>
           {(settings) =>
             isSetupComplete(settings) ? (

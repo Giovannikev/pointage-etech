@@ -16,7 +16,9 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { useOdooInstances } from "@/contexts/SettingsContext"
 import type { AppView } from "@/types/navigation"
@@ -39,7 +41,14 @@ export function AppSidebar({
   ...props
 }: AppSidebarProps) {
   const { t } = useTranslation()
+  const { setOpenMobile } = useSidebar()
   const instances = useOdooInstances()
+
+  // Every way of changing page also closes the sidebar sheet on phones.
+  const navigate = (view: AppView): void => {
+    onNavigate(view)
+    setOpenMobile(false)
+  }
   const navMain: NavMainItem[] = [
     { view: "timesheet", title: t("nav.timesheet"), icon: ClockIcon },
     { view: "settings", title: t("nav.settings"), icon: SettingsIcon },
@@ -53,12 +62,19 @@ export function AppSidebar({
   ]
 
   return (
-    <Sidebar collapsible="offcanvas" {...props}>
+    // Collapses to an icon rail on desktop (tooltips name each icon).
+    <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <SidebarMenu>
-          <SidebarMenuItem className="flex items-center gap-2 p-1.5">
-            <BrandMark />
-            <span className="text-base font-semibold">Pointage</span>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              tooltip="Pointage"
+              onClick={() => navigate("timesheet")}
+            >
+              <BrandMark className="size-8!" />
+              <span className="text-base font-semibold">Pointage</span>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
@@ -66,7 +82,7 @@ export function AppSidebar({
         <NavMain
           items={navMain}
           activeView={activeView}
-          onNavigate={onNavigate}
+          onNavigate={navigate}
         />
         <NavInstances instances={instances} />
         <NavSecondary items={navSecondary} className="mt-auto" />
@@ -74,7 +90,7 @@ export function AppSidebar({
       <SidebarFooter>
         <NavUser
           email={userEmail}
-          onOpenSettings={() => onNavigate("settings")}
+          onOpenSettings={() => navigate("settings")}
           onSignOut={onSignOut}
         />
       </SidebarFooter>

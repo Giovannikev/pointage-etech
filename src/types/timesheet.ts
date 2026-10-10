@@ -26,8 +26,8 @@ export interface ParsedCommit {
   moduleName: string | null
   action: CommitAction | null
   rawDescription: string
-  /** French description ready to be logged in Odoo. */
-  formattedDescription: string
+  /** French action and object, e.g. "Ajout de la fonction export"; empty when the message has neither. */
+  frenchSummary: string
 }
 
 /** An Odoo task matched from a task reference. */
@@ -65,6 +65,8 @@ export interface TimesheetEntry {
   id: string
   commit: ParsedCommit
   description: string
+  /** True once the user typed the description: it is no longer regenerated. */
+  isDescriptionEdited: boolean
   hours: number
   /** ISO date (YYYY-MM-DD) the timesheet is logged on. */
   date: string
