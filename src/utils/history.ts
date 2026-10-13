@@ -21,7 +21,12 @@ function matchesQuery(entry: TimesheetHistoryEntry, words: string[]): boolean {
     return true
   }
   const haystack = normalizeText(
-    [entry.description, entry.taskName ?? "", entry.projectName ?? ""].join(" ")
+    [
+      entry.description,
+      entry.taskName ?? "",
+      entry.ticketName ?? "",
+      entry.projectName ?? "",
+    ].join(" ")
   )
   return words.every((word) => haystack.includes(word))
 }
@@ -174,17 +179,23 @@ export function buildHistoryGrid(
   const totals = new Map<string, number>()
 
   for (const entry of entries) {
+    // A ticket names its line best, even when the line also has a task.
     const key =
-      entry.taskId === null
-        ? `${entry.instanceIndex}:project:${entry.projectId ?? 0}`
-        : `${entry.instanceIndex}:task:${entry.taskId}`
+      entry.ticketId !== null
+        ? `${entry.instanceIndex}:ticket:${entry.ticketId}`
+        : entry.taskId !== null
+          ? `${entry.instanceIndex}:task:${entry.taskId}`
+          : `${entry.instanceIndex}:project:${entry.projectId ?? 0}`
     let row = rows.get(key)
     if (row === undefined) {
       row = {
         key,
         instanceIndex: entry.instanceIndex,
-        label: entry.taskName ?? entry.projectName ?? "—",
-        projectName: entry.taskName === null ? null : entry.projectName,
+        label: entry.ticketName ?? entry.taskName ?? entry.projectName ?? "—",
+        projectName:
+          entry.taskName === null && entry.ticketName === null
+            ? null
+            : entry.projectName,
         hours: new Map(),
       }
       rows.set(key, row)
@@ -287,7 +298,9 @@ export const DAY_HOURS_WARNING = 10
 
 export interface DayLoadTarget {
   instanceIndex: OdooInstanceIndex
-  taskId: number
+  kind: "task" | "ticket"
+  /** Task id or ticket id, depending on `kind`. */
+  id: number
   hours: number
   description: string
 }
@@ -313,7 +326,7 @@ export function analyzeDayLoad(
   const onTask = entries.filter(
     (entry) =>
       entry.instanceIndex === target.instanceIndex &&
-      entry.taskId === target.taskId
+      (target.kind === "ticket" ? entry.ticketId : entry.taskId) === target.id
   )
   const description = normalizeText(target.description).replace(/\s+/g, " ")
   const dayHours = roundHours(entries.reduce((sum, e) => sum + e.hours, 0))
@@ -365,7 +378,7 @@ export function historyToCsv(
     escapeCell(entry.date, separator),
     escapeCell(instanceLabel(entry.instanceIndex), separator),
     escapeCell(entry.projectName ?? "", separator),
-    escapeCell(entry.taskName ?? "", separator),
+    escapeCell(entry.ticketName ?? entry.taskName ?? "", separator),
     escapeCell(entry.description, separator),
     // Numbers aren't escaped, so the spreadsheet reads them as numbers.
     String(entry.hours).replace(".", decimalSeparator),

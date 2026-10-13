@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next"
 
 import { SettingsForm } from "@/components/settings/SettingsForm"
-import { ReminderSettingsCard } from "@/components/settings/ReminderSettingsCard"
 import { SettingsGate } from "@/components/settings/SettingsGate"
 
 export function SettingsPage() {
@@ -18,12 +17,7 @@ export function SettingsPage() {
         </p>
       </div>
       <SettingsGate>
-        {(settings) => (
-          <>
-            <SettingsForm settings={settings} />
-            {settings.odooInstances.length > 0 && <ReminderSettingsCard />}
-          </>
-        )}
+        {(settings) => <SettingsForm settings={settings} />}
       </SettingsGate>
     </main>
   )

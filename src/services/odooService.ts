@@ -22,6 +22,9 @@ import type {
   TaskDetails,
   TaskSearchResult,
   TimesheetChanges,
+  HelpdeskTicket,
+  TaskSearchInstanceResult,
+  TicketsInstanceResult,
   TimesheetHistoryEntry,
   TimesheetHistoryInstanceResult,
   TimesheetLookup,
@@ -207,9 +210,12 @@ export async function fetchTaskDetails(
 
 const MY_TASKS_TTL_MS = 5 * 60_000
 const HISTORY_TTL_MS = 2 * 60_000
+const SEARCH_TTL_MS = 60_000
 
 const MY_TASKS_KEY: CacheKey<MyTasksInstanceResult[]> = cacheKey("myTasks")
 const HISTORY_PREFIX = "history:"
+const TASK_SEARCH_PREFIX = "taskSearch:"
+const TICKETS_PREFIX = "tickets:"
 
 function historyKey(
   period: CommitPeriod
@@ -222,10 +228,12 @@ export function clearOdooCache(): void {
   odooCache.clear()
 }
 
-/** Timesheets changed in Odoo: hours on tasks and the history are stale. */
+/** Timesheets changed in Odoo: logged hours everywhere are stale. */
 function invalidateTimesheetReads(): void {
   odooCache.invalidate(HISTORY_PREFIX)
   odooCache.invalidate(MY_TASKS_KEY.id)
+  odooCache.invalidate(TASK_SEARCH_PREFIX)
+  odooCache.invalidate(TICKETS_PREFIX)
 }
 
 /* ------------------------------------------------------------------ */
@@ -397,6 +405,10 @@ function toHistoryEntry(value: unknown): TimesheetHistoryEntry {
       projectName: value.projectName,
       taskId: value.taskId,
       taskName: value.taskName,
+      // Older gateways don't send the ticket link.
+      ticketId: isPositiveInteger(value.ticketId) ? value.ticketId : null,
+      ticketName:
+        typeof value.ticketName === "string" ? value.ticketName : null,
       locked: value.locked === true,
     }
   }
@@ -490,5 +502,151 @@ export async function deleteTimesheet(
     deleted.instanceIndex !== reference.instanceIndex
   ) {
     throw new InvalidResponseError(GATEWAY_FUNCTION)
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* SEARCH_TASKS                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Normalized so "Daily" and " daily " share one cache entry. */
+function searchKey(prefix: string, query: string): string {
+  return `${prefix}${query.trim().toLocaleLowerCase()}`
+}
+
+/** Any task with a project, assigned or not; cached for a minute. */
+export function searchAllTasks(
+  query: string,
+  options: CacheReadOptions = {}
+): Promise<TaskSearchInstanceResult[]> {
+  const key = cacheKey<TaskSearchInstanceResult[]>(
+    searchKey(TASK_SEARCH_PREFIX, query)
+  )
+  return odooCache.getOrFetch(
+    key,
+    SEARCH_TTL_MS,
+    async () =>
+      readInstanceResults(
+        await invokeGateway({ action: "SEARCH_TASKS", query: query.trim() })
+      ).map((value) =>
+        toInstanceResult(value, (record) => ({
+          tasks: readList(record.tasks, toKanbanTask),
+          truncated: record.truncated === true,
+        }))
+      ),
+    options
+  )
+}
+
+export function peekTaskSearch(
+  query: string
+): TaskSearchInstanceResult[] | undefined {
+  return odooCache.peek(
+    cacheKey<TaskSearchInstanceResult[]>(searchKey(TASK_SEARCH_PREFIX, query))
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* SEARCH_TICKETS / LOG_TICKET_TIME                                    */
+/* ------------------------------------------------------------------ */
+
+function toHelpdeskTicket(value: unknown): HelpdeskTicket {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.ticketId) &&
+    typeof value.name === "string" &&
+    isNullableString(value.ref) &&
+    isNullableString(value.stageName) &&
+    isNullableString(value.teamName) &&
+    typeof value.priority === "number" &&
+    isNullableId(value.projectId) &&
+    isNullableString(value.projectName) &&
+    isNullableNumber(value.hoursSpent) &&
+    typeof value.loggable === "boolean"
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      ticketId: value.ticketId,
+      name: value.name,
+      ref: value.ref,
+      stageName: value.stageName,
+      teamName: value.teamName,
+      priority: value.priority,
+      projectId: value.projectId,
+      projectName: value.projectName,
+      hoursSpent: value.hoursSpent,
+      loggable: value.loggable,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function ticketsKey(
+  query: string,
+  mine: boolean
+): CacheKey<TicketsInstanceResult[]> {
+  return cacheKey(
+    searchKey(`${TICKETS_PREFIX}${mine ? "mine" : "all"}:`, query)
+  )
+}
+
+/**
+ * The user's open tickets (`mine`, query optional) or every open ticket
+ * matching the query. Cached for a minute.
+ */
+export function searchTickets(
+  query: string,
+  mine: boolean,
+  options: CacheReadOptions = {}
+): Promise<TicketsInstanceResult[]> {
+  return odooCache.getOrFetch(
+    ticketsKey(query, mine),
+    SEARCH_TTL_MS,
+    async () =>
+      readInstanceResults(
+        await invokeGateway({
+          action: "SEARCH_TICKETS",
+          query: query.trim(),
+          mine,
+        })
+      ).map((value) =>
+        toInstanceResult(value, (record) => ({
+          available: record.available !== false,
+          tickets: readList(record.tickets, toHelpdeskTicket),
+          truncated: record.truncated === true,
+        }))
+      ),
+    options
+  )
+}
+
+export function peekTickets(
+  query: string,
+  mine: boolean
+): TicketsInstanceResult[] | undefined {
+  return odooCache.peek(ticketsKey(query, mine))
+}
+
+/** Logs time on a helpdesk ticket; resolves with the new line's id. */
+export async function logTicketTime(entry: {
+  instanceIndex: OdooInstanceIndex
+  ticketId: number
+  hours: number
+  description: string
+  date: string
+}): Promise<number> {
+  try {
+    const data = await invokeGateway({
+      action: "LOG_TICKET_TIME",
+      ...entry,
+      description: entry.description.trim(),
+    })
+    if (isRecord(data) && isPositiveInteger(data.timesheetId)) {
+      return data.timesheetId
+    }
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  } finally {
+    invalidateTimesheetReads()
   }
 }

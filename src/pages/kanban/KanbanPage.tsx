@@ -16,6 +16,7 @@ import {
   type QuickLogResult,
 } from "@/components/kanban/QuickLogDialog"
 import { SettingsGate } from "@/components/settings/SettingsGate"
+import { taskTarget, type LogTarget } from "@/components/timesheet/logTarget"
 import {
   InstanceFilter,
   type InstanceFilterValue,
@@ -147,7 +148,7 @@ function KanbanWorkspace() {
   })
   /** Columns whose folded state the user flipped, keyed by column key. */
   const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set())
-  const quickLog = useDialogTarget<KanbanTask>()
+  const quickLog = useDialogTarget<LogTarget>()
   const taskDetails = useTaskDetails()
 
   const fetcher = useCallback(
@@ -216,14 +217,14 @@ function KanbanWorkspace() {
     })
   }, [])
 
-  const handleLogged = ({ task, hours, date }: QuickLogResult): void => {
+  const handleLogged = ({ target, hours, date }: QuickLogResult): void => {
     quickLog.close()
     toast.success(
       t("quickLog.logged", {
         hours: formatHours(hours),
         date: formatShortDate(date),
       }),
-      { description: task.name }
+      { description: target.name }
     )
     // Logged hours changed in Odoo: read the tasks again.
     refresh()
@@ -306,7 +307,7 @@ function KanbanWorkspace() {
               showInstance={instance === "all" && instances.length > 1}
               onToggleCollapsed={toggleColumn}
               onOpenTask={(task) => taskDetails.open(toTaskMatch(task))}
-              onLogTime={quickLog.open}
+              onLogTime={(task) => quickLog.open(taskTarget(task))}
             />
           ))}
         </div>
@@ -436,7 +437,7 @@ function KanbanWorkspace() {
 
       <QuickLogDialog
         open={quickLog.isOpen}
-        task={quickLog.target}
+        target={quickLog.target}
         onOpenChange={(open) => !open && quickLog.close()}
         onLogged={handleLogged}
       />

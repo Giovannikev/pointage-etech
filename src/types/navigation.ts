@@ -1,1 +1,1 @@
-export type AppView = "timesheet" | "kanban" | "history" | "settings"
+export type AppView = "timesheet" | "kanban" | "tasks" | "history" | "settings"

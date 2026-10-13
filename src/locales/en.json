@@ -22,6 +22,7 @@
   "nav": {
     "timesheet": "Timesheet",
     "kanban": "Kanban",
+    "tasks": "Tasks",
     "history": "History",
     "settings": "Settings",
     "odooInstances": "Odoo instances",
@@ -260,7 +261,8 @@
     "hours": "Hours",
     "description": "Description",
     "submit": "Log time",
-    "logged": "Logged {{hours}} on {{date}}"
+    "logged": "Logged {{hours}} on {{date}}",
+    "titleTicket": "Log time on the ticket"
   },
   "history": {
     "subtitle": "The time you logged in Odoo over the period.",
@@ -323,7 +325,9 @@
     "nothingYet": "Nothing logged in Odoo on this day yet.",
     "already": "Already logged that day: {{day}}, including {{task}} on this task.",
     "duplicate": "A line with the same description already exists on this task that day.",
-    "tooLong": "With this line, the day would reach {{total}} (more than {{limit}})."
+    "tooLong": "With this line, the day would reach {{total}} (more than {{limit}}).",
+    "alreadyTicket": "Already logged that day: {{day}}, including {{task}} on this ticket.",
+    "duplicateTicket": "A line with the same description already exists on this ticket that day."
   },
   "completeDay": {
     "title": "Complete the day",
@@ -343,17 +347,31 @@
     "done": "Hours spread over the workday",
     "doneHint": "Lines are estimated from the time between commits. Adjust any of them: your value will be kept."
   },
-  "reminder": {
-    "title": "Daily reminder",
-    "description": "On working days, get an email when less than 8 h is logged in your Odoo instances by the chosen hour.",
-    "enabled": "Email me when my day isn't complete",
-    "hour": "Check at",
-    "hourOption": "{{hour}}:00",
-    "timezone": "Time zone: {{timezone}}",
-    "save": "Save reminder",
-    "savedOn": "Reminder on",
-    "savedOff": "Reminder off",
-    "saveError": "Couldn't save the reminder",
-    "loadError": "Couldn't load the reminder: {{message}}"
+  "tasks": {
+    "title": "Tasks and tickets",
+    "subtitle": "Find any Odoo task or helpdesk ticket, assigned to you or not, and log time on it.",
+    "typeLabel": "What to search",
+    "tabTasks": "Tasks",
+    "tabTickets": "Helpdesk tickets",
+    "scopeLabel": "Which tickets",
+    "myTickets": "My open tickets",
+    "allTickets": "All open tickets",
+    "search": "Search",
+    "searchTasksPlaceholder": "Task name, reference, project or #ID",
+    "searchTicketsPlaceholder": "Ticket title, reference or #ID",
+    "searchTasksTitle": "Search any task",
+    "searchTasksHint": "Type at least 2 characters: a name (\"Daily\"), a reference (\"01-501\"), a project, or an ID (\"#18486\"). Tasks assigned to someone else are found too.",
+    "searchTicketsTitle": "Search the open tickets",
+    "searchTicketsHint": "Type at least 2 characters of a title, a reference or an ID.",
+    "loadError": "Couldn't search Odoo",
+    "noResults": "Nothing matches this search",
+    "noResultsHint": "Check the spelling, try a shorter search, or show all instances.",
+    "truncated": "Only the first 50 results per instance are shown. Refine the search to find the others.",
+    "ticket": "Helpdesk ticket",
+    "ticketNotLoggable": "Time can't be logged on this ticket: its helpdesk team doesn't track timesheets, or has no project for them.",
+    "helpdeskMissing": "No Helpdesk app on your instances",
+    "helpdeskMissingHint": "Tickets appear here when the Helpdesk app is installed on one of your Odoo instances.",
+    "noOpenTickets": "No open ticket assigned to you",
+    "noOpenTicketsHint": "Switch to all open tickets to find one assigned to someone else."
   }
 }

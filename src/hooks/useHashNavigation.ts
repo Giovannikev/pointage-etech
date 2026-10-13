@@ -5,6 +5,7 @@ import type { AppView } from "@/types/navigation"
 const APP_VIEWS: readonly AppView[] = [
   "timesheet",
   "kanban",
+  "tasks",
   "history",
   "settings",
 ]

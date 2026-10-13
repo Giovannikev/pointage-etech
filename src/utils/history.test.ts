@@ -141,7 +141,8 @@ describe("analyzeDayLoad", () => {
   it("reports the day, the task, duplicates and long days", () => {
     const load = analyzeDayLoad(results, {
       instanceIndex: 1,
-      taskId: 1,
+      kind: "task",
+      id: 1,
       hours: 3,
       description: "  =sum(a1) ",
     })
@@ -151,6 +152,41 @@ describe("analyzeDayLoad", () => {
       totalAfter: 17.5,
       exceedsLimit: true,
       hasDuplicate: true,
+    })
+  })
+})
+
+describe("analyzeDayLoad on tickets", () => {
+  it("counts the hours of the ticket, not of a task with the same id", () => {
+    const withTicket: TimesheetHistoryInstanceResult[] = [
+      {
+        instanceIndex: 1,
+        ok: true,
+        truncated: false,
+        entries: [
+          historyEntry({
+            timesheetId: 9,
+            hours: 2,
+            taskId: null,
+            taskName: null,
+            ticketId: 1,
+            ticketName: "HT1",
+          }),
+          historyEntry({ timesheetId: 10, hours: 4, taskId: 1 }),
+        ],
+      },
+    ]
+    const load = analyzeDayLoad(withTicket, {
+      instanceIndex: 1,
+      kind: "ticket",
+      id: 1,
+      hours: 1,
+      description: "",
+    })
+    expect(load).toMatchObject({
+      dayHours: 6,
+      taskHours: 2,
+      hasDuplicate: false,
     })
   })
 })

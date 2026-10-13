@@ -19,7 +19,9 @@ interface DayLoadNoticeProps {
   /** YYYY-MM-DD */
   date: string
   instanceIndex: OdooInstanceIndex
-  taskId: number
+  kind: "task" | "ticket"
+  /** Task id or ticket id, depending on `kind`. */
+  id: number
   /** Hours about to be logged. */
   hours: number
   description: string
@@ -32,7 +34,8 @@ interface DayLoadNoticeProps {
 export function DayLoadNotice({
   date,
   instanceIndex,
-  taskId,
+  kind,
+  id,
   hours,
   description,
 }: DayLoadNoticeProps) {
@@ -68,12 +71,15 @@ export function DayLoadNotice({
 
   const load = analyzeDayLoad(day.data, {
     instanceIndex,
-    taskId,
+    kind,
+    id,
     hours,
     description,
   })
   const warnings = [
-    load.hasDuplicate ? t("dayLoad.duplicate") : null,
+    load.hasDuplicate
+      ? t(kind === "ticket" ? "dayLoad.duplicateTicket" : "dayLoad.duplicate")
+      : null,
     load.exceedsLimit
       ? t("dayLoad.tooLong", {
           total: formatHours(load.totalAfter),
@@ -96,7 +102,7 @@ export function DayLoadNotice({
         <InfoIcon className="mt-px size-3.5 shrink-0" aria-hidden />
         {load.dayHours === 0
           ? t("dayLoad.nothingYet")
-          : t("dayLoad.already", {
+          : t(kind === "ticket" ? "dayLoad.alreadyTicket" : "dayLoad.already", {
               day: formatHours(load.dayHours),
               task: formatHours(load.taskHours),
             })}

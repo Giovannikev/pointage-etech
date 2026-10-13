@@ -22,6 +22,7 @@
   "nav": {
     "timesheet": "Feuille de temps",
     "kanban": "Kanban",
+    "tasks": "Tâches",
     "history": "Historique",
     "settings": "Paramètres",
     "odooInstances": "Instances Odoo",
@@ -260,7 +261,8 @@
     "hours": "Heures",
     "description": "Description",
     "submit": "Pointer",
-    "logged": "{{hours}} pointées le {{date}}"
+    "logged": "{{hours}} pointées le {{date}}",
+    "titleTicket": "Pointer sur le ticket"
   },
   "history": {
     "subtitle": "Le temps que vous avez pointé dans Odoo sur la période.",
@@ -323,7 +325,9 @@
     "nothingYet": "Rien n'est encore pointé dans Odoo ce jour-là.",
     "already": "Déjà pointé ce jour-là : {{day}}, dont {{task}} sur cette tâche.",
     "duplicate": "Une ligne avec la même description existe déjà sur cette tâche ce jour-là.",
-    "tooLong": "Avec cette ligne, la journée atteindrait {{total}} (plus de {{limit}})."
+    "tooLong": "Avec cette ligne, la journée atteindrait {{total}} (plus de {{limit}}).",
+    "alreadyTicket": "Déjà pointé ce jour-là : {{day}}, dont {{task}} sur ce ticket.",
+    "duplicateTicket": "Une ligne avec la même description existe déjà sur ce ticket ce jour-là."
   },
   "completeDay": {
     "title": "Compléter la journée",
@@ -343,17 +347,31 @@
     "done": "Heures réparties sur la journée",
     "doneHint": "Les lignes sont estimées d'après le temps entre les commits. Corrigez-en une si besoin : votre valeur sera conservée."
   },
-  "reminder": {
-    "title": "Rappel quotidien",
-    "description": "Les jours ouvrés, recevez un e-mail si moins de 8 h sont pointées dans vos instances Odoo à l'heure choisie.",
-    "enabled": "M'envoyer un e-mail si ma journée n'est pas complète",
-    "hour": "Vérifier à",
-    "hourOption": "{{hour}} h",
-    "timezone": "Fuseau horaire : {{timezone}}",
-    "save": "Enregistrer le rappel",
-    "savedOn": "Rappel activé",
-    "savedOff": "Rappel désactivé",
-    "saveError": "Impossible d'enregistrer le rappel",
-    "loadError": "Impossible de charger le rappel : {{message}}"
+  "tasks": {
+    "title": "Tâches et tickets",
+    "subtitle": "Retrouvez n'importe quelle tâche ou ticket d'assistance Odoo, qu'il vous soit assigné ou non, et pointez dessus.",
+    "typeLabel": "Quoi rechercher",
+    "tabTasks": "Tâches",
+    "tabTickets": "Tickets d'assistance",
+    "scopeLabel": "Quels tickets",
+    "myTickets": "Mes tickets ouverts",
+    "allTickets": "Tous les tickets ouverts",
+    "search": "Rechercher",
+    "searchTasksPlaceholder": "Nom de tâche, référence, projet ou #ID",
+    "searchTicketsPlaceholder": "Titre du ticket, référence ou #ID",
+    "searchTasksTitle": "Recherchez n'importe quelle tâche",
+    "searchTasksHint": "Tapez au moins 2 caractères : un nom (« Daily »), une référence (« 01-501 »), un projet ou un ID (« #18486 »). Les tâches assignées à d'autres personnes sont aussi trouvées.",
+    "searchTicketsTitle": "Recherchez dans les tickets ouverts",
+    "searchTicketsHint": "Tapez au moins 2 caractères d'un titre, d'une référence ou d'un ID.",
+    "loadError": "Impossible de rechercher dans Odoo",
+    "noResults": "Rien ne correspond à cette recherche",
+    "noResultsHint": "Vérifiez l'orthographe, essayez une recherche plus courte, ou affichez toutes les instances.",
+    "truncated": "Seuls les 50 premiers résultats par instance sont affichés. Précisez la recherche pour trouver les autres.",
+    "ticket": "Ticket d'assistance",
+    "ticketNotLoggable": "Impossible de pointer sur ce ticket : son équipe d'assistance ne gère pas les feuilles de temps, ou n'a pas de projet pour cela.",
+    "helpdeskMissing": "Pas de module Assistance sur vos instances",
+    "helpdeskMissingHint": "Les tickets apparaissent ici quand le module Assistance est installé sur l'une de vos instances Odoo.",
+    "noOpenTickets": "Aucun ticket ouvert ne vous est assigné",
+    "noOpenTicketsHint": "Passez à « Tous les tickets ouverts » pour en trouver un assigné à quelqu'un d'autre."
   }
 }

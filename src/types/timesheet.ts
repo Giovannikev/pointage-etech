@@ -246,6 +246,9 @@ export interface TimesheetHistoryEntry {
   projectName: string | null
   taskId: number | null
   taskName: string | null
+  /** Set for time logged on a helpdesk ticket. */
+  ticketId: number | null
+  ticketName: string | null
   /** Validated in Odoo (Timesheets app): it can't be changed anymore. */
   locked: boolean
 }
@@ -300,6 +303,64 @@ export interface DeleteTimesheetResponse {
   deleted: TimesheetReference
 }
 
+/* ---- Task and ticket search ------------------------------------- */
+
+export interface SearchTasksRequest {
+  action: "SEARCH_TASKS"
+  /** 2 to 100 characters: name, project, or "#id". */
+  query: string
+  instanceIndex?: OdooInstanceIndex
+}
+
+export type TaskSearchInstanceResult = InstanceResult<{
+  tasks: KanbanTask[]
+  truncated: boolean
+}>
+
+/** A helpdesk ticket (Odoo Helpdesk app). */
+export interface HelpdeskTicket {
+  instanceIndex: OdooInstanceIndex
+  ticketId: number
+  name: string
+  /** The ticket's reference when the instance has one (e.g. "HT10605"). */
+  ref: string | null
+  stageName: string | null
+  teamName: string | null
+  priority: number
+  projectId: number | null
+  projectName: string | null
+  /** null when the instance doesn't track time on tickets. */
+  hoursSpent: number | null
+  /** Time can be logged: timesheets on tickets are on and it has a project. */
+  loggable: boolean
+}
+
+export interface SearchTicketsRequest {
+  action: "SEARCH_TICKETS"
+  /** Optional with `mine`, otherwise 2 to 100 characters. */
+  query: string
+  /** Only the user's open tickets. */
+  mine: boolean
+  instanceIndex?: OdooInstanceIndex
+}
+
+export type TicketsInstanceResult = InstanceResult<{
+  /** False when the Helpdesk app isn't installed on the instance. */
+  available: boolean
+  tickets: HelpdeskTicket[]
+  truncated: boolean
+}>
+
+export interface LogTicketTimeRequest {
+  action: "LOG_TICKET_TIME"
+  instanceIndex: OdooInstanceIndex
+  ticketId: number
+  hours: number
+  description: string
+  /** YYYY-MM-DD */
+  date: string
+}
+
 export type GatewayRequest =
   | SearchTaskRequest
   | SubmitTimesheetRequest
@@ -309,6 +370,9 @@ export type GatewayRequest =
   | GetTimesheetHistoryRequest
   | UpdateTimesheetRequest
   | DeleteTimesheetRequest
+  | SearchTasksRequest
+  | SearchTicketsRequest
+  | LogTicketTimeRequest
 
 /* ------------------------------------------------------------------ */
 /* github-commits Edge Function contract                               */

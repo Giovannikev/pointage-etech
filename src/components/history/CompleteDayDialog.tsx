@@ -263,7 +263,8 @@ function CompleteDayForm({
         <DayLoadNotice
           date={day.date}
           instanceIndex={task.instanceIndex}
-          taskId={task.taskId}
+          kind="task"
+          id={task.taskId}
           hours={hoursValid ? parsedHours : 0}
           description={description}
         />

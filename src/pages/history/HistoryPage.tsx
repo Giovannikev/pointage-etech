@@ -112,7 +112,11 @@ function toEditable(entry: TimesheetHistoryEntry): EditableTimesheet {
     date: entry.date,
     hours: entry.hours,
     description: entry.description,
-    label: entry.taskName ?? entry.projectName ?? entry.description,
+    label:
+      entry.ticketName ??
+      entry.taskName ??
+      entry.projectName ??
+      entry.description,
   }
 }
 

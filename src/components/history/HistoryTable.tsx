@@ -78,7 +78,7 @@ function EntryActions({ entry, onEdit, onDelete }: EntryActionsProps) {
           size="icon-sm"
           className="text-muted-foreground"
           aria-label={t("history.actionsFor", {
-            line: entry.taskName ?? entry.description,
+            line: entry.ticketName ?? entry.taskName ?? entry.description,
           })}
         >
           <EllipsisIcon />
@@ -152,8 +152,11 @@ function TaskCell({ entry }: { entry: TimesheetHistoryEntry }) {
       >
         {entry.projectName ?? "—"}
       </span>
-      <span className="block truncate" title={entry.taskName ?? undefined}>
-        {entry.taskName ?? "—"}
+      <span
+        className="block truncate"
+        title={entry.ticketName ?? entry.taskName ?? undefined}
+      >
+        {entry.ticketName ?? entry.taskName ?? "—"}
       </span>
     </div>
   )

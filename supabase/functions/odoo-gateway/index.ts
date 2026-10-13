@@ -13,6 +13,9 @@
  *   { action: "GET_TIMESHEET_HISTORY", dateFrom, dateTo, instanceIndex? }
  *   { action: "UPDATE_TIMESHEET", instanceIndex, timesheetId, hours, description }
  *   { action: "DELETE_TIMESHEET", instanceIndex, timesheetId }
+ *   { action: "SEARCH_TASKS", query, instanceIndex? }
+ *   { action: "SEARCH_TICKETS", query, mine, instanceIndex? }
+ *   { action: "LOG_TICKET_TIME", instanceIndex, ticketId, hours, description, date }
  */
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
@@ -146,8 +149,44 @@ interface TimesheetHistoryEntry {
   projectName: string | null
   taskId: number | null
   taskName: string | null
+  /** Set for time logged on a helpdesk ticket. */
+  ticketId: number | null
+  ticketName: string | null
   /** Validated in Odoo (Timesheets app): it can't be changed anymore. */
   locked: boolean
+}
+
+/** A helpdesk ticket, as listed in the Tasks page. */
+interface HelpdeskTicket {
+  instanceIndex: InstanceIndex
+  ticketId: number
+  name: string
+  /** The ticket's reference when the instance has one (e.g. "HT10605"). */
+  ref: string | null
+  stageName: string | null
+  teamName: string | null
+  priority: number
+  projectId: number | null
+  projectName: string | null
+  /** null when the instance doesn't track time on tickets. */
+  hoursSpent: number | null
+  /** Time can be logged: timesheets on tickets are on and it has a project. */
+  loggable: boolean
+}
+
+interface TicketQuery {
+  query: string
+  /** Only the user's open tickets (the query then filters nothing server side). */
+  mine: boolean
+  instanceIndex: InstanceIndex | null
+}
+
+interface TicketTimeEntry {
+  instanceIndex: InstanceIndex
+  ticketId: number
+  hours: number
+  description: string
+  date: string
 }
 
 /** One result per instance, so a failing instance doesn't hide the other one. */
@@ -159,6 +198,18 @@ type MyTasksResult = InstanceResult<{
   tasks: KanbanTask[]
   stages: KanbanStage[]
   /** True when the task limit was reached and older tasks were left out. */
+  truncated: boolean
+}>
+
+type TaskSearchInstanceResult = InstanceResult<{
+  tasks: KanbanTask[]
+  truncated: boolean
+}>
+
+type TicketsInstanceResult = InstanceResult<{
+  /** False when the Helpdesk app isn't installed on the instance. */
+  available: boolean
+  tickets: HelpdeskTicket[]
   truncated: boolean
 }>
 
@@ -192,6 +243,13 @@ type GatewayRequest =
   | ({ action: "GET_TIMESHEET_HISTORY" } & HistoryQuery)
   | ({ action: "UPDATE_TIMESHEET" } & TimesheetUpdate)
   | ({ action: "DELETE_TIMESHEET" } & TimesheetReference)
+  | {
+      action: "SEARCH_TASKS"
+      query: string
+      instanceIndex: InstanceIndex | null
+    }
+  | ({ action: "SEARCH_TICKETS" } & TicketQuery)
+  | ({ action: "LOG_TICKET_TIME" } & TicketTimeEntry)
 
 /* ------------------------------------------------------------------ */
 /* Request validation                                                  */
@@ -208,6 +266,10 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const MY_TASKS_LIMIT = 1_000
 const HISTORY_LIMIT = 2_000
 const MAX_HISTORY_DAYS = 366
+const SEARCH_LIMIT = 50
+const MY_TICKETS_LIMIT = 200
+const MIN_QUERY_LENGTH = 2
+const MAX_QUERY_LENGTH = 100
 const MS_PER_DAY = 86_400_000
 
 function isInstanceIndex(value: unknown): value is InstanceIndex {
@@ -343,6 +405,21 @@ function parseHistoryQuery(body: Record<string, unknown>): HistoryQuery {
   }
 }
 
+/** A search text of 2 to 100 characters; empty is allowed when `optional`. */
+function readQuery(value: unknown, optional: boolean): string {
+  const query = typeof value === "string" ? value.trim() : ""
+  if (optional && query === "") {
+    return ""
+  }
+  if (query.length < MIN_QUERY_LENGTH || query.length > MAX_QUERY_LENGTH) {
+    throw new HttpError(
+      `"query" must be ${MIN_QUERY_LENGTH} to ${MAX_QUERY_LENGTH} characters.`,
+      400
+    )
+  }
+  return query
+}
+
 function parseRequest(body: unknown): GatewayRequest {
   if (!isRecord(body)) {
     throw new HttpError("Request body must be a JSON object.", 400)
@@ -420,8 +497,49 @@ function parseRequest(body: unknown): GatewayRequest {
     return { action: "DELETE_TIMESHEET", ...parseTimesheetReference(body) }
   }
 
+  if (body.action === "SEARCH_TASKS") {
+    return {
+      action: "SEARCH_TASKS",
+      query: readQuery(body.query, false),
+      instanceIndex: readOptionalInstance(body.instanceIndex),
+    }
+  }
+
+  if (body.action === "SEARCH_TICKETS") {
+    const mine = body.mine === true
+    return {
+      action: "SEARCH_TICKETS",
+      mine,
+      query: readQuery(body.query, mine),
+      instanceIndex: readOptionalInstance(body.instanceIndex),
+    }
+  }
+
+  if (body.action === "LOG_TICKET_TIME") {
+    if (
+      !isInstanceIndex(body.instanceIndex) ||
+      !isPositiveInteger(body.ticketId) ||
+      !isValidHours(body.hours) ||
+      !isNonEmptyString(body.description, MAX_DESCRIPTION_LENGTH) ||
+      !isIsoDate(body.date)
+    ) {
+      throw new HttpError(
+        '"instanceIndex", "ticketId", "hours", "description" and "date" are required.',
+        400
+      )
+    }
+    return {
+      action: "LOG_TICKET_TIME",
+      instanceIndex: body.instanceIndex,
+      ticketId: body.ticketId,
+      hours: body.hours,
+      description: body.description.trim(),
+      date: body.date,
+    }
+  }
+
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET" or "DELETE_TIMESHEET".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS" or "LOG_TICKET_TIME".',
     400
   )
 }
@@ -466,13 +584,32 @@ async function getModelFields(
   return fields
 }
 
-/** The timesheet fields to read, with "validated" when the instance has it. */
+/**
+ * Field linking a timesheet line to its helpdesk ticket: Odoo Enterprise's
+ * Helpdesk, or OCA's helpdesk_mgmt_timesheet.
+ */
+const TICKET_LINK_FIELDS = ["helpdesk_ticket_id", "ticket_id"] as const
+type TicketLinkField = (typeof TICKET_LINK_FIELDS)[number]
+
+function findTicketLinkField(lineFields: Set<string>): TicketLinkField | null {
+  return TICKET_LINK_FIELDS.find((field) => lineFields.has(field)) ?? null
+}
+
+/**
+ * The timesheet fields to read, plus "validated" (Timesheets app) and the
+ * ticket link (Helpdesk timesheets) when the instance has them.
+ */
 async function timesheetFields(
   session: OdooSession,
   base: readonly string[]
 ): Promise<string[]> {
   const fields = await getModelFields(session, "account.analytic.line")
-  return fields.has("validated") ? [...base, "validated"] : [...base]
+  const ticketLink = findTicketLinkField(fields)
+  return [
+    ...base,
+    ...(fields.has("validated") ? ["validated"] : []),
+    ...(ticketLink === null ? [] : [ticketLink]),
+  ]
 }
 
 /* ------------------------------------------------------------------ */
@@ -1122,6 +1259,8 @@ function readHistoryEntry(
   }
   const project = readMany2one(record.project_id)
   const task = readMany2one(record.task_id)
+  const ticket =
+    readMany2one(record.helpdesk_ticket_id) ?? readMany2one(record.ticket_id)
   return {
     instanceIndex,
     timesheetId: record.id,
@@ -1132,6 +1271,8 @@ function readHistoryEntry(
     projectName: project?.name ?? null,
     taskId: task?.id ?? null,
     taskName: task?.name ?? null,
+    ticketId: ticket?.id ?? null,
+    ticketName: ticket?.name ?? null,
     locked: record.validated === true,
   }
 }
@@ -1269,6 +1410,295 @@ async function deleteTimesheet(
 }
 
 /* ------------------------------------------------------------------ */
+/* SEARCH_TASKS                                                        */
+/* ------------------------------------------------------------------ */
+
+/** "18486" or "#18486" as a record id; null for any other text. */
+function readIdQuery(query: string): number | null {
+  const match = /^#?(\d{1,9})$/.exec(query)
+  return match === null ? null : Number(match[1])
+}
+
+/** OR of the leaves, in Odoo's prefix notation. */
+function anyOf(leaves: unknown[]): unknown[] {
+  return [...Array(Math.max(0, leaves.length - 1)).fill("|"), ...leaves]
+}
+
+/** Any active task with a project, assigned or not, by name, project or id. */
+function searchAllTasks(
+  instances: OdooInstanceSettings[],
+  query: string,
+  instanceIndex: InstanceIndex | null
+): Promise<TaskSearchInstanceResult[]> {
+  const id = readIdQuery(query)
+  const matches = anyOf([
+    ["name", "ilike", query],
+    ["project_id", "ilike", query],
+    ...(id === null ? [] : [["id", "=", id]]),
+  ])
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const support = await detectTaskFields(session)
+      const records = await executeKw(
+        session,
+        "project.task",
+        "search_read",
+        [[["active", "=", true], ["project_id", "!=", false], ...matches]],
+        {
+          fields: support.fields,
+          limit: SEARCH_LIMIT,
+          order: "priority desc, id desc",
+        }
+      )
+      const raw = readRecords(records, session, "task")
+      return {
+        tasks: raw.flatMap(
+          (record) => readKanbanTask(record, index, support) ?? []
+        ),
+        truncated: raw.length >= SEARCH_LIMIT,
+      }
+    }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* SEARCH_TICKETS                                                      */
+/* ------------------------------------------------------------------ */
+
+const TICKET_MODEL = "helpdesk.ticket"
+const BASE_TICKET_FIELDS = ["id", "name", "stage_id", "team_id", "priority"]
+
+/**
+ * Fields holding a ticket's reference ("HT10605"), by preference: Odoo's
+ * own (recent versions), then "number" (helpdesk_mgmt and similar apps).
+ */
+const TICKET_REF_FIELDS = ["ticket_ref", "number"] as const
+
+interface TicketSupport {
+  fields: string[]
+  /** The reference field of this instance, if any. */
+  refField: (typeof TICKET_REF_FIELDS)[number] | null
+  /** Field linking timesheet lines to tickets; null without ticket timesheets. */
+  lineLink: TicketLinkField | null
+  /** Ticket flag telling whether its team logs time on tickets. */
+  timesheetFlag: "use_helpdesk_timesheet" | "allow_timesheet" | null
+  hoursField: "total_hours_spent" | "effective_hours" | "total_hours" | null
+  hasTask: boolean
+  openDomain: unknown[]
+}
+
+/**
+ * null when no helpdesk app is installed. Works with Odoo Enterprise's
+ * Helpdesk and with OCA's helpdesk_mgmt (+ helpdesk_mgmt_timesheet), whose
+ * field names differ.
+ */
+async function detectTicketFields(
+  session: OdooSession
+): Promise<TicketSupport | null> {
+  let ticket: Set<string>
+  try {
+    ticket = await getModelFields(session, TICKET_MODEL)
+  } catch (error) {
+    // Odoo answers "Object helpdesk.ticket doesn't exist" without the app.
+    if (error instanceof OdooRpcError) {
+      return null
+    }
+    throw error
+  }
+  const lines = await getModelFields(session, "account.analytic.line")
+  const has = (field: string) => ticket.has(field)
+  const first = <T extends string>(candidates: readonly T[]): T | null =>
+    candidates.find((field) => has(field)) ?? null
+
+  const refField = first(TICKET_REF_FIELDS)
+  const timesheetFlag = first([
+    "use_helpdesk_timesheet",
+    "allow_timesheet",
+  ] as const)
+  const hoursField = first([
+    "total_hours_spent",
+    "effective_hours",
+    "total_hours",
+  ] as const)
+  const hasTask = has("task_id")
+  const optional = [
+    refField,
+    "project_id",
+    timesheetFlag,
+    hoursField,
+    hasTask ? "task_id" : null,
+  ].filter((field): field is string => field !== null && has(field))
+
+  // Open tickets, as each app marks closing: a close date (Enterprise), a
+  // "closed" flag from the stage (OCA), or else a folded stage.
+  const openDomain = has("close_date")
+    ? [["close_date", "=", false]]
+    : has("closed")
+      ? [["closed", "=", false]]
+      : [["stage_id.fold", "=", false]]
+
+  return {
+    fields: [...BASE_TICKET_FIELDS.filter(has), ...optional],
+    refField,
+    lineLink: has("project_id") ? findTicketLinkField(lines) : null,
+    timesheetFlag,
+    hoursField,
+    hasTask,
+    openDomain,
+  }
+}
+
+function readTicket(
+  record: unknown,
+  instanceIndex: InstanceIndex,
+  support: TicketSupport
+): HelpdeskTicket | null {
+  if (
+    !isRecord(record) ||
+    !isPositiveInteger(record.id) ||
+    typeof record.name !== "string"
+  ) {
+    return null
+  }
+  const project = readMany2one(record.project_id)
+  const priority = Number(record.priority)
+  return {
+    instanceIndex,
+    ticketId: record.id,
+    name: record.name,
+    ref:
+      support.refField !== null && typeof record[support.refField] === "string"
+        ? (record[support.refField] as string)
+        : null,
+    stageName: readMany2one(record.stage_id)?.name ?? null,
+    teamName: readMany2one(record.team_id)?.name ?? null,
+    priority: Number.isInteger(priority) && priority > 0 ? priority : 0,
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    hoursSpent:
+      support.hoursField === null
+        ? null
+        : (readNumber(record[support.hoursField]) ?? 0),
+    loggable:
+      support.lineLink !== null &&
+      project !== null &&
+      (support.timesheetFlag === null ||
+        record[support.timesheetFlag] !== false),
+  }
+}
+
+function searchTickets(
+  instances: OdooInstanceSettings[],
+  { query, mine, instanceIndex }: TicketQuery
+): Promise<TicketsInstanceResult[]> {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const support = await detectTicketFields(session)
+      if (support === null) {
+        return { available: false, tickets: [], truncated: false }
+      }
+      const id = readIdQuery(query)
+      const matches =
+        query === ""
+          ? []
+          : anyOf([
+              ["name", "ilike", query],
+              ...(support.refField === null
+                ? []
+                : [[support.refField, "ilike", query]]),
+              ...(id === null ? [] : [["id", "=", id]]),
+            ])
+      const limit = mine ? MY_TICKETS_LIMIT : SEARCH_LIMIT
+      const records = await executeKw(
+        session,
+        TICKET_MODEL,
+        "search_read",
+        [
+          [
+            ...support.openDomain,
+            ...(mine ? [["user_id", "=", session.uid]] : []),
+            ...matches,
+          ],
+        ],
+        { fields: support.fields, limit, order: "priority desc, id desc" }
+      )
+      const raw = readRecords(records, session, "ticket")
+      return {
+        available: true,
+        tickets: raw.flatMap(
+          (record) => readTicket(record, index, support) ?? []
+        ),
+        truncated: raw.length >= limit,
+      }
+    }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* LOG_TICKET_TIME                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Logs time on a ticket, on the project its helpdesk team logs time in. */
+async function logTicketTime(
+  instances: OdooInstanceSettings[],
+  entry: TicketTimeEntry
+): Promise<{ timesheetId: number }> {
+  const session = await createSessionPool(instances)(entry.instanceIndex)
+  const support = await detectTicketFields(session)
+  if (support === null || support.lineLink === null) {
+    throw new HttpError(
+      `${session.connection.label} doesn't track time on helpdesk tickets.`,
+      409
+    )
+  }
+  const records = await executeKw(
+    session,
+    TICKET_MODEL,
+    "read",
+    [[entry.ticketId]],
+    { fields: support.fields }
+  )
+  const ticket = readTicket(
+    Array.isArray(records) ? records[0] : undefined,
+    entry.instanceIndex,
+    support
+  )
+  if (ticket === null) {
+    throw new HttpError("This ticket can't be read in Odoo.", 404)
+  }
+  if (!ticket.loggable || ticket.projectId === null) {
+    throw new HttpError(
+      "Time can't be logged on this ticket: its helpdesk team has no timesheet project.",
+      409
+    )
+  }
+  const record = Array.isArray(records) ? records[0] : undefined
+  // OCA tickets can point at a task of the project: the line goes there too.
+  const task =
+    support.hasTask && isRecord(record) ? readMany2one(record.task_id) : null
+  const timesheetId = await asConflict(
+    executeKw(session, "account.analytic.line", "create", [
+      {
+        name: entry.description,
+        project_id: ticket.projectId,
+        [support.lineLink]: entry.ticketId,
+        ...(task === null ? {} : { task_id: task.id }),
+        unit_amount: entry.hours,
+        date: entry.date,
+      },
+    ])
+  )
+  if (!isPositiveInteger(timesheetId)) {
+    throw new HttpError("Odoo didn't return the new timesheet id.", 502)
+  }
+  return { timesheetId }
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP handler                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1303,6 +1733,18 @@ serveJson("odoo-gateway", {
         return { timesheet: await updateTimesheet(instances, gatewayRequest) }
       case "DELETE_TIMESHEET":
         return { deleted: await deleteTimesheet(instances, gatewayRequest) }
+      case "SEARCH_TASKS":
+        return {
+          instances: await searchAllTasks(
+            instances,
+            gatewayRequest.query,
+            gatewayRequest.instanceIndex
+          ),
+        }
+      case "SEARCH_TICKETS":
+        return { instances: await searchTickets(instances, gatewayRequest) }
+      case "LOG_TICKET_TIME":
+        return await logTicketTime(instances, gatewayRequest)
     }
   },
 })

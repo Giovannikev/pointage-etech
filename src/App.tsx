@@ -13,6 +13,7 @@ import { SignInPage } from "@/pages/auth/SignInPage"
 import { HistoryPage } from "@/pages/history/HistoryPage"
 import { KanbanPage } from "@/pages/kanban/KanbanPage"
 import { SettingsPage } from "@/pages/settings/SettingsPage"
+import { TasksPage } from "@/pages/tasks/TasksPage"
 import { TimesheetPage } from "@/pages/timesheet/TimesheetPage"
 import { signOut } from "@/services/authService"
 import { clearOdooCache } from "@/services/odooService"
@@ -44,6 +45,8 @@ function Workspace({ userEmail }: { userEmail: string }) {
         )
       case "kanban":
         return <KanbanPage onOpenSettings={openSettings} />
+      case "tasks":
+        return <TasksPage onOpenSettings={openSettings} />
       case "history":
         return <HistoryPage onOpenSettings={openSettings} />
       case "settings":

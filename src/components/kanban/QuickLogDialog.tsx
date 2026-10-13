@@ -5,6 +5,11 @@ import { useTranslation } from "react-i18next"
 import { DatePicker } from "@/components/timesheet/DatePicker"
 import { DayLoadNotice } from "@/components/timesheet/DayLoadNotice"
 import { InstanceBadge } from "@/components/timesheet/InstanceBadge"
+import {
+  logOnTarget,
+  targetKey,
+  type LogTarget,
+} from "@/components/timesheet/logTarget"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -18,8 +23,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { logTime } from "@/services/odooService"
-import type { KanbanTask } from "@/types/timesheet"
 import { todayIsoDate } from "@/utils/date"
 import { splitTaskName } from "@/utils/kanban"
 import {
@@ -33,23 +36,24 @@ const DEFAULT_HOURS = "1"
 
 /** What was logged, for the confirmation toast. */
 export interface QuickLogResult {
-  task: KanbanTask
+  target: LogTarget
   hours: number
   date: string
 }
 
 interface QuickLogDialogProps {
   open: boolean
-  task: KanbanTask | null
+  /** A task or a helpdesk ticket. */
+  target: LogTarget | null
   onOpenChange: (open: boolean) => void
   onLogged: (result: QuickLogResult) => void
 }
 
 function QuickLogForm({
-  task,
+  target,
   onLogged,
 }: {
-  task: KanbanTask
+  target: LogTarget
   onLogged: QuickLogDialogProps["onLogged"]
 }) {
   const { t } = useTranslation()
@@ -63,7 +67,7 @@ function QuickLogForm({
   const parsedHours = Number(hours)
   const hoursValid = isValidHours(parsedHours)
   const canLog =
-    task.projectId !== null &&
+    target.blockedReason === null &&
     hoursValid &&
     description.trim() !== "" &&
     !isLogging
@@ -72,39 +76,42 @@ function QuickLogForm({
     event: FormEvent<HTMLFormElement>
   ): Promise<void> => {
     event.preventDefault()
-    if (!canLog || task.projectId === null) {
+    if (!canLog) {
       return
     }
     setIsLogging(true)
     setError(null)
     try {
-      await logTime({
-        clientId: crypto.randomUUID(),
-        taskId: task.taskId,
-        projectId: task.projectId,
+      await logOnTarget(target, {
         hours: parsedHours,
         description: description.trim(),
         date,
-        instanceIndex: task.instanceIndex,
       })
-      onLogged({ task, hours: parsedHours, date })
+      onLogged({ target, hours: parsedHours, date })
     } catch (logError) {
       setError(logError instanceof Error ? logError.message : String(logError))
       setIsLogging(false)
     }
   }
 
-  const { ref, title } = splitTaskName(task.name)
+  // Tasks carry their reference in the name; tickets in a field of their own.
+  const parts = splitTaskName(target.name)
+  const ref = target.ref ?? parts.ref
+  const title = target.ref === null ? parts.title : target.name
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-4">
       <DialogHeader>
-        <DialogTitle>{t("quickLog.title")}</DialogTitle>
+        <DialogTitle>
+          {target.kind === "ticket"
+            ? t("quickLog.titleTicket")
+            : t("quickLog.title")}
+        </DialogTitle>
         <DialogDescription asChild>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <InstanceBadge instanceIndex={task.instanceIndex} />
-            {task.projectName !== null && (
-              <span className="truncate">{task.projectName}</span>
+            <InstanceBadge instanceIndex={target.instanceIndex} />
+            {target.projectName !== null && (
+              <span className="truncate">{target.projectName}</span>
             )}
           </div>
         </DialogDescription>
@@ -143,8 +150,9 @@ function QuickLogForm({
 
       <DayLoadNotice
         date={date}
-        instanceIndex={task.instanceIndex}
-        taskId={task.taskId}
+        instanceIndex={target.instanceIndex}
+        kind={target.kind}
+        id={target.id}
         hours={hoursValid ? parsedHours : 0}
         description={description}
       />
@@ -184,20 +192,20 @@ function QuickLogForm({
   )
 }
 
-/** Logs time on a task straight from its Kanban card. */
+/** Logs time on a task or a ticket in one step, from a card. */
 export function QuickLogDialog({
   open,
-  task,
+  target,
   onOpenChange,
   onLogged,
 }: QuickLogDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        {task !== null && (
+        {target !== null && (
           <QuickLogForm
-            key={`${task.instanceIndex}:${task.taskId}`}
-            task={task}
+            key={targetKey(target)}
+            target={target}
             onLogged={onLogged}
           />
         )}

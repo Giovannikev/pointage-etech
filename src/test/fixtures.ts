@@ -37,6 +37,8 @@ export function historyEntry(
     projectName: "Project",
     taskId: 1,
     taskName: "Task",
+    ticketId: null,
+    ticketName: null,
     locked: false,
     ...overrides,
   }

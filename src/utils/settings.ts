@@ -28,3 +28,15 @@ export function getTaskUrl(
     ? null
     : `${instance.url}/web#id=${task.taskId}&model=project.task&view_type=form`
 }
+
+/** Link to a helpdesk ticket's form in its Odoo instance. */
+export function getTicketUrl(
+  instances: OdooInstanceSettings[],
+  instanceIndex: OdooInstanceIndex,
+  ticketId: number
+): string | null {
+  const instance = instances.find((item) => item.index === instanceIndex)
+  return instance === undefined
+    ? null
+    : `${instance.url}/web#id=${ticketId}&model=helpdesk.ticket&view_type=form`
+}

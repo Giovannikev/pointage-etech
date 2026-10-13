@@ -108,7 +108,7 @@ Build them with:
 
 ```bash
 cd supabase/functions
-for fn in user-settings github-commits odoo-gateway daily-reminder; do
+for fn in user-settings github-commits odoo-gateway; do
   npx esbuild@0.25 "$fn/index.ts" --bundle --format=esm --platform=neutral \
     --target=es2022 --external:'npm:*' --outfile="../../dist-functions/$fn.ts"
 done
@@ -127,7 +127,6 @@ pnpm dlx supabase link --project-ref <ref>
 pnpm dlx supabase db push
 pnpm dlx supabase secrets set CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 pnpm dlx supabase functions deploy user-settings github-commits odoo-gateway
-pnpm dlx supabase functions deploy daily-reminder --no-verify-jwt   # see Daily reminder
 ```
 
 ### Edge Function secrets
@@ -269,6 +268,9 @@ it is kept as written. A description edited by hand is never regenerated.
 | `GET_TIMESHEET_HISTORY` | `dateFrom`, `dateTo` (366 days max), `instanceIndex?` | The user's timesheets of the period, per instance |
 | `UPDATE_TIMESHEET` | `instanceIndex`, `timesheetId`, `hours`, `description` | The line as stored by Odoo |
 | `DELETE_TIMESHEET` | `instanceIndex`, `timesheetId` | The deleted line's reference |
+| `SEARCH_TASKS` | `query` (2-100 chars: name, project or `#id`), `instanceIndex?` | Any active task with a project, assigned or not (50 max per instance) |
+| `SEARCH_TICKETS` | `query`, `mine`, `instanceIndex?` | Open helpdesk tickets: the user's (`mine`) or matching the query |
+| `LOG_TICKET_TIME` | `instanceIndex`, `ticketId`, `hours`, `description`, `date` | The created timesheet id, logged on the ticket's project |
 
 The read actions answer per instance (`{ instanceIndex, ok, ... }`), so one
 unreachable instance doesn't hide the other. `GET_MY_TASKS` detects the task
@@ -283,6 +285,12 @@ any timesheet write clears both. Views are addressed by the URL hash:
 (`#kanban?group=project&projects=2:5`, `#history?from=2026-10-01&to=2026-10-31&view=grid`),
 so a reload or a shared link reopens the same view.
 
+The Tasks page (`#tasks`) finds any task, assigned or not, and the helpdesk
+tickets (Odoo Helpdesk app, `helpdesk.ticket`): time logged on a ticket goes
+to the project of its helpdesk team, with `helpdesk_ticket_id` set, as Odoo's
+own ticket timesheets do. Instances without the Helpdesk app, or whose teams
+don't track time, are detected and shown as such.
+
 Validated timesheets (Odoo Timesheets app, `validated` field) are shown
 locked and can't be edited or deleted from Pointage.
 
@@ -290,30 +298,6 @@ The front end splits larger batches into several requests. Shared server code
 (auth, encryption, Odoo and GitHub clients, validation) lives in
 `supabase/functions/_shared`. The request and response types are mirrored in
 `src/types` and `supabase/functions/_shared/settings.ts`.
-
-## Daily reminder
-
-Users can turn on, in Settings, an email sent on working days when less than
-8 h is logged in their Odoo instances by a chosen hour. Setup, once:
-
-1. **Table**: run `supabase/migrations/20261014000000_reminder_preferences.sql`
-   in the SQL Editor (or `supabase db push`).
-2. **Email**: create a [Resend](https://resend.com) account, verify the
-   sending domain, and create an API key.
-3. **Secrets** (Edge Functions → Secrets): `RESEND_API_KEY`,
-   `REMINDER_FROM_EMAIL` (e.g. `Pointage <rappel@your-domain.com>`), `APP_URL`
-   (the deployed app's URL) and `CRON_SECRET` (a long random string:
-   `openssl rand -hex 32`).
-4. **Function**: deploy `daily-reminder` with **Verify JWT off**
-   (`supabase functions deploy daily-reminder --no-verify-jwt`): pg_cron
-   calls it without a user session, and the `x-cron-secret` header protects it.
-5. **Schedule**: enable the `pg_cron` and `pg_net` extensions, then run
-   `supabase/cron/daily-reminder.sql` after filling in the project reference
-   and the same `CRON_SECRET`.
-
-The function runs every 15 minutes, checks each user once per working day
-after their reminder hour (in their own time zone), and never emails when an
-Odoo instance can't be read.
 
 ## Tests
 

@@ -47,12 +47,33 @@ async function requireUserId(request) {
 }
 
 // _shared/http.ts
-function corsHeaders(allowedMethods) {
-  return {
-    "Access-Control-Allow-Origin": readEnv("ALLOWED_ORIGIN") ?? "*",
+function parseAllowedOrigins(value) {
+  if (value === null) {
+    return null;
+  }
+  const origins = value.split(",").map((origin) => origin.trim().replace(/\/+$/, "")).filter((origin) => origin !== "");
+  return origins.length === 0 || origins.includes("*") ? null : origins;
+}
+function resolveAllowedOrigin(allowed, requestOrigin) {
+  if (allowed === null) {
+    return "*";
+  }
+  return requestOrigin !== null && allowed.includes(requestOrigin) ? requestOrigin : allowed[0];
+}
+function corsHeaders(request, allowedMethods) {
+  const allowed = parseAllowedOrigins(readEnv("ALLOWED_ORIGIN"));
+  const headers = {
+    "Access-Control-Allow-Origin": resolveAllowedOrigin(
+      allowed,
+      request.headers.get("Origin")
+    ),
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": allowedMethods
   };
+  if (allowed !== null) {
+    headers.Vary = "Origin";
+  }
+  return headers;
 }
 async function readJsonBody(request) {
   try {
@@ -63,12 +84,13 @@ async function readJsonBody(request) {
 }
 function serveJson(functionName, handlers) {
   const methods = Object.keys(handlers);
-  const headers = corsHeaders(["OPTIONS", ...methods].join(", "));
-  const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
-    status,
-    headers: { ...headers, "Content-Type": "application/json" }
-  });
+  const allowedMethods = ["OPTIONS", ...methods].join(", ");
   Deno.serve(async (request) => {
+    const headers = corsHeaders(request, allowedMethods);
+    const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
+      status,
+      headers: { ...headers, "Content-Type": "application/json" }
+    });
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers });
     }
@@ -399,6 +421,10 @@ var ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 var MY_TASKS_LIMIT = 1e3;
 var HISTORY_LIMIT = 2e3;
 var MAX_HISTORY_DAYS = 366;
+var SEARCH_LIMIT = 50;
+var MY_TICKETS_LIMIT = 200;
+var MIN_QUERY_LENGTH = 2;
+var MAX_QUERY_LENGTH = 100;
 var MS_PER_DAY = 864e5;
 function isInstanceIndex2(value) {
   return value === 1 || value === 2;
@@ -482,6 +508,19 @@ function parseHistoryQuery(body) {
     instanceIndex: readOptionalInstance(body.instanceIndex)
   };
 }
+function readQuery(value, optional) {
+  const query = typeof value === "string" ? value.trim() : "";
+  if (optional && query === "") {
+    return "";
+  }
+  if (query.length < MIN_QUERY_LENGTH || query.length > MAX_QUERY_LENGTH) {
+    throw new HttpError(
+      `"query" must be ${MIN_QUERY_LENGTH} to ${MAX_QUERY_LENGTH} characters.`,
+      400
+    );
+  }
+  return query;
+}
 function parseRequest(body) {
   if (!isRecord(body)) {
     throw new HttpError("Request body must be a JSON object.", 400);
@@ -547,8 +586,40 @@ function parseRequest(body) {
   if (body.action === "DELETE_TIMESHEET") {
     return { action: "DELETE_TIMESHEET", ...parseTimesheetReference(body) };
   }
+  if (body.action === "SEARCH_TASKS") {
+    return {
+      action: "SEARCH_TASKS",
+      query: readQuery(body.query, false),
+      instanceIndex: readOptionalInstance(body.instanceIndex)
+    };
+  }
+  if (body.action === "SEARCH_TICKETS") {
+    const mine = body.mine === true;
+    return {
+      action: "SEARCH_TICKETS",
+      mine,
+      query: readQuery(body.query, mine),
+      instanceIndex: readOptionalInstance(body.instanceIndex)
+    };
+  }
+  if (body.action === "LOG_TICKET_TIME") {
+    if (!isInstanceIndex2(body.instanceIndex) || !isPositiveInteger(body.ticketId) || !isValidHours(body.hours) || !isNonEmptyString(body.description, MAX_DESCRIPTION_LENGTH) || !isIsoDate(body.date)) {
+      throw new HttpError(
+        '"instanceIndex", "ticketId", "hours", "description" and "date" are required.',
+        400
+      );
+    }
+    return {
+      action: "LOG_TICKET_TIME",
+      instanceIndex: body.instanceIndex,
+      ticketId: body.ticketId,
+      hours: body.hours,
+      description: body.description.trim(),
+      date: body.date
+    };
+  }
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET" or "DELETE_TIMESHEET".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS" or "LOG_TICKET_TIME".',
     400
   );
 }
@@ -574,9 +645,18 @@ async function getModelFields(session, model) {
   fieldsCache.set(key, { fields, expiresAt: Date.now() + FIELDS_CACHE_TTL_MS });
   return fields;
 }
+var TICKET_LINK_FIELDS = ["helpdesk_ticket_id", "ticket_id"];
+function findTicketLinkField(lineFields) {
+  return TICKET_LINK_FIELDS.find((field) => lineFields.has(field)) ?? null;
+}
 async function timesheetFields(session, base) {
   const fields = await getModelFields(session, "account.analytic.line");
-  return fields.has("validated") ? [...base, "validated"] : [...base];
+  const ticketLink = findTicketLinkField(fields);
+  return [
+    ...base,
+    ...fields.has("validated") ? ["validated"] : [],
+    ...ticketLink === null ? [] : [ticketLink]
+  ];
 }
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1028,6 +1108,7 @@ function readHistoryEntry(record, instanceIndex) {
   }
   const project = readMany2one(record.project_id);
   const task = readMany2one(record.task_id);
+  const ticket = readMany2one(record.helpdesk_ticket_id) ?? readMany2one(record.ticket_id);
   return {
     instanceIndex,
     timesheetId: record.id,
@@ -1038,6 +1119,8 @@ function readHistoryEntry(record, instanceIndex) {
     projectName: project?.name ?? null,
     taskId: task?.id ?? null,
     taskName: task?.name ?? null,
+    ticketId: ticket?.id ?? null,
+    ticketName: ticket?.name ?? null,
     locked: record.validated === true
   };
 }
@@ -1142,6 +1225,200 @@ async function deleteTimesheet(instances, { instanceIndex, timesheetId }) {
   }
   return { instanceIndex, timesheetId };
 }
+function readIdQuery(query) {
+  const match = /^#?(\d{1,9})$/.exec(query);
+  return match === null ? null : Number(match[1]);
+}
+function anyOf(leaves) {
+  return [...Array(Math.max(0, leaves.length - 1)).fill("|"), ...leaves];
+}
+function searchAllTasks(instances, query, instanceIndex) {
+  const id = readIdQuery(query);
+  const matches = anyOf([
+    ["name", "ilike", query],
+    ["project_id", "ilike", query],
+    ...id === null ? [] : [["id", "=", id]]
+  ]);
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const support = await detectTaskFields(session);
+      const records = await executeKw(
+        session,
+        "project.task",
+        "search_read",
+        [[["active", "=", true], ["project_id", "!=", false], ...matches]],
+        {
+          fields: support.fields,
+          limit: SEARCH_LIMIT,
+          order: "priority desc, id desc"
+        }
+      );
+      const raw = readRecords(records, session, "task");
+      return {
+        tasks: raw.flatMap(
+          (record) => readKanbanTask(record, index, support) ?? []
+        ),
+        truncated: raw.length >= SEARCH_LIMIT
+      };
+    }
+  );
+}
+var TICKET_MODEL = "helpdesk.ticket";
+var BASE_TICKET_FIELDS = ["id", "name", "stage_id", "team_id", "priority"];
+var TICKET_REF_FIELDS = ["ticket_ref", "number"];
+async function detectTicketFields(session) {
+  let ticket;
+  try {
+    ticket = await getModelFields(session, TICKET_MODEL);
+  } catch (error) {
+    if (error instanceof OdooRpcError) {
+      return null;
+    }
+    throw error;
+  }
+  const lines = await getModelFields(session, "account.analytic.line");
+  const has = (field) => ticket.has(field);
+  const first = (candidates) => candidates.find((field) => has(field)) ?? null;
+  const refField = first(TICKET_REF_FIELDS);
+  const timesheetFlag = first([
+    "use_helpdesk_timesheet",
+    "allow_timesheet"
+  ]);
+  const hoursField = first([
+    "total_hours_spent",
+    "effective_hours",
+    "total_hours"
+  ]);
+  const hasTask = has("task_id");
+  const optional = [
+    refField,
+    "project_id",
+    timesheetFlag,
+    hoursField,
+    hasTask ? "task_id" : null
+  ].filter((field) => field !== null && has(field));
+  const openDomain = has("close_date") ? [["close_date", "=", false]] : has("closed") ? [["closed", "=", false]] : [["stage_id.fold", "=", false]];
+  return {
+    fields: [...BASE_TICKET_FIELDS.filter(has), ...optional],
+    refField,
+    lineLink: has("project_id") ? findTicketLinkField(lines) : null,
+    timesheetFlag,
+    hoursField,
+    hasTask,
+    openDomain
+  };
+}
+function readTicket(record, instanceIndex, support) {
+  if (!isRecord(record) || !isPositiveInteger(record.id) || typeof record.name !== "string") {
+    return null;
+  }
+  const project = readMany2one(record.project_id);
+  const priority = Number(record.priority);
+  return {
+    instanceIndex,
+    ticketId: record.id,
+    name: record.name,
+    ref: support.refField !== null && typeof record[support.refField] === "string" ? record[support.refField] : null,
+    stageName: readMany2one(record.stage_id)?.name ?? null,
+    teamName: readMany2one(record.team_id)?.name ?? null,
+    priority: Number.isInteger(priority) && priority > 0 ? priority : 0,
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    hoursSpent: support.hoursField === null ? null : readNumber(record[support.hoursField]) ?? 0,
+    loggable: support.lineLink !== null && project !== null && (support.timesheetFlag === null || record[support.timesheetFlag] !== false)
+  };
+}
+function searchTickets(instances, { query, mine, instanceIndex }) {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const support = await detectTicketFields(session);
+      if (support === null) {
+        return { available: false, tickets: [], truncated: false };
+      }
+      const id = readIdQuery(query);
+      const matches = query === "" ? [] : anyOf([
+        ["name", "ilike", query],
+        ...support.refField === null ? [] : [[support.refField, "ilike", query]],
+        ...id === null ? [] : [["id", "=", id]]
+      ]);
+      const limit = mine ? MY_TICKETS_LIMIT : SEARCH_LIMIT;
+      const records = await executeKw(
+        session,
+        TICKET_MODEL,
+        "search_read",
+        [
+          [
+            ...support.openDomain,
+            ...mine ? [["user_id", "=", session.uid]] : [],
+            ...matches
+          ]
+        ],
+        { fields: support.fields, limit, order: "priority desc, id desc" }
+      );
+      const raw = readRecords(records, session, "ticket");
+      return {
+        available: true,
+        tickets: raw.flatMap(
+          (record) => readTicket(record, index, support) ?? []
+        ),
+        truncated: raw.length >= limit
+      };
+    }
+  );
+}
+async function logTicketTime(instances, entry) {
+  const session = await createSessionPool(instances)(entry.instanceIndex);
+  const support = await detectTicketFields(session);
+  if (support === null || support.lineLink === null) {
+    throw new HttpError(
+      `${session.connection.label} doesn't track time on helpdesk tickets.`,
+      409
+    );
+  }
+  const records = await executeKw(
+    session,
+    TICKET_MODEL,
+    "read",
+    [[entry.ticketId]],
+    { fields: support.fields }
+  );
+  const ticket = readTicket(
+    Array.isArray(records) ? records[0] : void 0,
+    entry.instanceIndex,
+    support
+  );
+  if (ticket === null) {
+    throw new HttpError("This ticket can't be read in Odoo.", 404);
+  }
+  if (!ticket.loggable || ticket.projectId === null) {
+    throw new HttpError(
+      "Time can't be logged on this ticket: its helpdesk team has no timesheet project.",
+      409
+    );
+  }
+  const record = Array.isArray(records) ? records[0] : void 0;
+  const task = support.hasTask && isRecord(record) ? readMany2one(record.task_id) : null;
+  const timesheetId = await asConflict(
+    executeKw(session, "account.analytic.line", "create", [
+      {
+        name: entry.description,
+        project_id: ticket.projectId,
+        [support.lineLink]: entry.ticketId,
+        ...task === null ? {} : { task_id: task.id },
+        unit_amount: entry.hours,
+        date: entry.date
+      }
+    ])
+  );
+  if (!isPositiveInteger(timesheetId)) {
+    throw new HttpError("Odoo didn't return the new timesheet id.", 502);
+  }
+  return { timesheetId };
+}
 serveJson("odoo-gateway", {
   POST: async ({ request, userId }) => {
     const gatewayRequest = parseRequest(await readJsonBody(request));
@@ -1173,6 +1450,18 @@ serveJson("odoo-gateway", {
         return { timesheet: await updateTimesheet(instances, gatewayRequest) };
       case "DELETE_TIMESHEET":
         return { deleted: await deleteTimesheet(instances, gatewayRequest) };
+      case "SEARCH_TASKS":
+        return {
+          instances: await searchAllTasks(
+            instances,
+            gatewayRequest.query,
+            gatewayRequest.instanceIndex
+          )
+        };
+      case "SEARCH_TICKETS":
+        return { instances: await searchTickets(instances, gatewayRequest) };
+      case "LOG_TICKET_TIME":
+        return await logTicketTime(instances, gatewayRequest);
     }
   }
 });
