@@ -1,5 +1,11 @@
 import type { ComponentProps } from "react"
-import { ClockIcon, KeyRoundIcon, SettingsIcon } from "lucide-react"
+import {
+  ClockIcon,
+  Columns3Icon,
+  HistoryIcon,
+  KeyRoundIcon,
+  SettingsIcon,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { BrandMark } from "@/components/BrandMark"
@@ -51,6 +57,8 @@ export function AppSidebar({
   }
   const navMain: NavMainItem[] = [
     { view: "timesheet", title: t("nav.timesheet"), icon: ClockIcon },
+    { view: "kanban", title: t("nav.kanban"), icon: Columns3Icon },
+    { view: "history", title: t("nav.history"), icon: HistoryIcon },
     { view: "settings", title: t("nav.settings"), icon: SettingsIcon },
   ]
   const navSecondary: NavSecondaryItem[] = [

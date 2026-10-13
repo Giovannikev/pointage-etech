@@ -4,7 +4,8 @@
     "loading": "Loading",
     "tryAgain": "Try again",
     "openSettings": "Open settings",
-    "openInOdoo": "Open in Odoo"
+    "openInOdoo": "Open in Odoo",
+    "clearFilters": "Clear filters"
   },
   "app": {
     "tagline": "Turn your GitHub commits into Odoo timesheets.",
@@ -20,6 +21,8 @@
   },
   "nav": {
     "timesheet": "Timesheet",
+    "kanban": "Kanban",
+    "history": "History",
     "settings": "Settings",
     "odooInstances": "Odoo instances",
     "createGithubToken": "Create a GitHub token",
@@ -120,7 +123,9 @@
     "checkAgain": "Check task again",
     "submitLine": "Submit this line",
     "removeLine": "Remove line",
-    "removeLoggedLine": "Remove from list (stays in Odoo)"
+    "removeLoggedLine": "Remove from list (stays in Odoo)",
+    "editInOdoo": "Edit in Odoo",
+    "deleteFromOdoo": "Delete from Odoo"
   },
   "status": {
     "pending": "Pending",
@@ -188,5 +193,167 @@
     "partlySubmitted": "{{submitted}} submitted, {{failed}} failed",
     "submitError_one": "Couldn't submit {{count}} timesheet",
     "submitError_other": "Couldn't submit {{count}} timesheets"
+  },
+  "instanceFilter": {
+    "label": "Odoo instance",
+    "all": "All",
+    "readError": "Couldn't read {{instance}}."
+  },
+  "kanban": {
+    "title": "My tasks",
+    "subtitle": "The Odoo tasks assigned to you, by stage.",
+    "summary_one": "{{count}} task in {{columns}} stages",
+    "summary_other": "{{count}} tasks in {{columns}} stages",
+    "refresh": "Reload tasks from Odoo",
+    "refreshError": "Couldn't reload the tasks: {{message}}",
+    "search": "Search tasks",
+    "searchPlaceholder": "Reference, task or project",
+    "boardLabel": "Task board, scrolls sideways",
+    "loadError": "Couldn't load your tasks",
+    "emptyTitle": "No tasks assigned to you",
+    "emptyDescription": "Tasks assigned to you in your Odoo instances show up here, grouped by stage.",
+    "noMatch": "No tasks match these filters",
+    "noMatchHint": "Try another search, or show all instances.",
+    "truncated": "Only your 1,000 most important tasks per instance are shown.",
+    "noStage": "No stage",
+    "expandColumn": "Expand {{name}}",
+    "collapseColumn": "Collapse {{name}}",
+    "starred": "Starred",
+    "overdue": "Overdue since {{date}}",
+    "hoursLogged": "{{hours}} logged",
+    "hoursOfPlanned": "{{hours}} of {{planned}}",
+    "logTime": "Log time",
+    "noProject": "This task has no project, so time can't be logged on it.",
+    "status": {
+      "in_progress": "In progress",
+      "changes_requested": "Changes requested",
+      "approved": "Approved",
+      "done": "Done",
+      "canceled": "Cancelled",
+      "waiting": "Waiting",
+      "blocked": "Blocked"
+    },
+    "projectFilter": {
+      "label": "Filter by project",
+      "all": "All projects",
+      "count_one": "{{count}} project",
+      "count_other": "{{count}} projects",
+      "search": "Search a project",
+      "noMatch": "No project matches",
+      "noProject": "No project",
+      "clear": "Show all projects"
+    },
+    "summaryByProject_one": "{{count}} task in {{columns}} projects",
+    "summaryByProject_other": "{{count}} tasks in {{columns}} projects",
+    "groupBy": {
+      "label": "Group tasks by",
+      "stage": "By stage",
+      "project": "By project"
+    },
+    "showClosed": "Closed tasks",
+    "closedHidden_one": "{{count}} closed task hidden",
+    "closedHidden_other": "{{count}} closed tasks hidden"
+  },
+  "quickLog": {
+    "title": "Log time",
+    "date": "Date",
+    "hours": "Hours",
+    "description": "Description",
+    "submit": "Log time",
+    "logged": "Logged {{hours}} on {{date}}"
+  },
+  "history": {
+    "subtitle": "The time you logged in Odoo over the period.",
+    "search": "Search timesheets",
+    "searchPlaceholder": "Description, task or project",
+    "refresh": "Reload timesheets from Odoo",
+    "refreshError": "Couldn't reload the timesheets: {{message}}",
+    "loadError": "Couldn't load your timesheets",
+    "lineCount_one": "{{count}} timesheet line",
+    "lineCount_other": "{{count}} timesheet lines",
+    "exportCsv": "Export CSV",
+    "exported_one": "Exported {{count}} line",
+    "exported_other": "Exported {{count}} lines",
+    "truncated": "Only the 2,000 most recent lines per instance are shown. Pick a shorter period to see them all.",
+    "summaryLabel": "Summary of the period",
+    "totalHours": "Total",
+    "averagePerDay": "Average per logged day",
+    "targetMet": "Workday target met",
+    "fullDays": "Days at {{target}}",
+    "chartCaption": "Hours per day. The dashed line is the {{target}} workday.",
+    "dayComplete": "Full day",
+    "dayShort": "{{hours}} short",
+    "emptyTitle": "No time logged in this period",
+    "emptyDescription": "Pick another period, or log time from the timesheet or the Kanban board.",
+    "noMatch": "No lines match these filters",
+    "noMatchHint": "Try another search, or show all instances.",
+    "actionsFor": "Actions for {{line}}",
+    "edit": "Edit",
+    "delete": "Delete",
+    "grid": {
+      "caption": "Hours per task and per day",
+      "total": "Total",
+      "dayTotal": "Day total",
+      "missingDay": "Nothing logged on this working day",
+      "tooLong": "The grid shows up to {{count}} days. Pick a shorter period, or use the list."
+    },
+    "view": {
+      "label": "Display",
+      "list": "List",
+      "grid": "Grid"
+    },
+    "locked": "Validated in Odoo: it can't be changed anymore."
+  },
+  "editTimesheet": {
+    "title": "Edit timesheet",
+    "hours": "Hours",
+    "description": "Description",
+    "save": "Save changes",
+    "saved": "Timesheet updated in Odoo"
+  },
+  "deleteTimesheet": {
+    "title": "Delete this timesheet from Odoo?",
+    "description": "The {{hours}} logged on {{date}} will be removed from Odoo. This can't be undone.",
+    "confirm": "Delete from Odoo",
+    "deleted": "Timesheet deleted from Odoo",
+    "backInList": "The {{hours}} line stays in your list, ready to submit again."
+  },
+  "dayLoad": {
+    "checking": "Checking what this day already holds in Odoo",
+    "nothingYet": "Nothing logged in Odoo on this day yet.",
+    "already": "Already logged that day: {{day}}, including {{task}} on this task.",
+    "duplicate": "A line with the same description already exists on this task that day.",
+    "tooLong": "With this line, the day would reach {{total}} (more than {{limit}})."
+  },
+  "completeDay": {
+    "title": "Complete the day",
+    "description": "{{date}} is {{hours}} short of a full day. Pick the task to log them on.",
+    "button": "Complete",
+    "buttonFor": "Complete {{date}}",
+    "task": "Task",
+    "searchTask": "Search a task or project",
+    "otherTasks": "Other tasks assigned to you",
+    "loadingTasks": "Loading your tasks",
+    "noTask": "No task matches",
+    "logged": "Logged {{hours}} on {{date}}"
+  },
+  "estimate": {
+    "button": "Spread hours",
+    "hint": "Spreads an 8 h workday over each day's lines to submit, by the time between commits. Hours you typed and lines already in Odoo stay as they are.",
+    "done": "Hours spread over the workday",
+    "doneHint": "Lines are estimated from the time between commits. Adjust any of them: your value will be kept."
+  },
+  "reminder": {
+    "title": "Daily reminder",
+    "description": "On working days, get an email when less than 8 h is logged in your Odoo instances by the chosen hour.",
+    "enabled": "Email me when my day isn't complete",
+    "hour": "Check at",
+    "hourOption": "{{hour}}:00",
+    "timezone": "Time zone: {{timezone}}",
+    "save": "Save reminder",
+    "savedOn": "Reminder on",
+    "savedOff": "Reminder off",
+    "saveError": "Couldn't save the reminder",
+    "loadError": "Couldn't load the reminder: {{message}}"
   }
 }

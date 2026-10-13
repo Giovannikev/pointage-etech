@@ -4,7 +4,8 @@
     "loading": "Chargement",
     "tryAgain": "Réessayer",
     "openSettings": "Ouvrir les paramètres",
-    "openInOdoo": "Ouvrir dans Odoo"
+    "openInOdoo": "Ouvrir dans Odoo",
+    "clearFilters": "Effacer les filtres"
   },
   "app": {
     "tagline": "Transformez vos commits GitHub en feuilles de temps Odoo.",
@@ -20,6 +21,8 @@
   },
   "nav": {
     "timesheet": "Feuille de temps",
+    "kanban": "Kanban",
+    "history": "Historique",
     "settings": "Paramètres",
     "odooInstances": "Instances Odoo",
     "createGithubToken": "Créer un token GitHub",
@@ -120,7 +123,9 @@
     "checkAgain": "Revérifier la tâche",
     "submitLine": "Envoyer cette ligne",
     "removeLine": "Supprimer la ligne",
-    "removeLoggedLine": "Retirer de la liste (reste dans Odoo)"
+    "removeLoggedLine": "Retirer de la liste (reste dans Odoo)",
+    "editInOdoo": "Modifier dans Odoo",
+    "deleteFromOdoo": "Supprimer d'Odoo"
   },
   "status": {
     "pending": "En attente",
@@ -188,5 +193,167 @@
     "partlySubmitted": "{{submitted}} envoyées, {{failed}} en échec",
     "submitError_one": "Impossible d'envoyer {{count}} ligne",
     "submitError_other": "Impossible d'envoyer {{count}} lignes"
+  },
+  "instanceFilter": {
+    "label": "Instance Odoo",
+    "all": "Toutes",
+    "readError": "Impossible de lire {{instance}}."
+  },
+  "kanban": {
+    "title": "Mes tâches",
+    "subtitle": "Les tâches Odoo qui vous sont assignées, par étape.",
+    "summary_one": "{{count}} tâche dans {{columns}} étapes",
+    "summary_other": "{{count}} tâches dans {{columns}} étapes",
+    "refresh": "Recharger les tâches depuis Odoo",
+    "refreshError": "Impossible de recharger les tâches : {{message}}",
+    "search": "Rechercher des tâches",
+    "searchPlaceholder": "Référence, tâche ou projet",
+    "boardLabel": "Tableau des tâches, défilement horizontal",
+    "loadError": "Impossible de charger vos tâches",
+    "emptyTitle": "Aucune tâche ne vous est assignée",
+    "emptyDescription": "Les tâches qui vous sont assignées dans vos instances Odoo apparaissent ici, regroupées par étape.",
+    "noMatch": "Aucune tâche ne correspond à ces filtres",
+    "noMatchHint": "Essayez une autre recherche, ou affichez toutes les instances.",
+    "truncated": "Seules vos 1 000 tâches les plus importantes par instance sont affichées.",
+    "noStage": "Sans étape",
+    "expandColumn": "Déplier {{name}}",
+    "collapseColumn": "Replier {{name}}",
+    "starred": "Prioritaire",
+    "overdue": "En retard depuis le {{date}}",
+    "hoursLogged": "{{hours}} pointées",
+    "hoursOfPlanned": "{{hours}} sur {{planned}}",
+    "logTime": "Pointer",
+    "noProject": "Cette tâche n'a pas de projet : impossible d'y pointer du temps.",
+    "status": {
+      "in_progress": "En cours",
+      "changes_requested": "Modifications demandées",
+      "approved": "Approuvée",
+      "done": "Terminée",
+      "canceled": "Annulée",
+      "waiting": "En attente",
+      "blocked": "Bloquée"
+    },
+    "projectFilter": {
+      "label": "Filtrer par projet",
+      "all": "Tous les projets",
+      "count_one": "{{count}} projet",
+      "count_other": "{{count}} projets",
+      "search": "Rechercher un projet",
+      "noMatch": "Aucun projet ne correspond",
+      "noProject": "Sans projet",
+      "clear": "Afficher tous les projets"
+    },
+    "summaryByProject_one": "{{count}} tâche dans {{columns}} projets",
+    "summaryByProject_other": "{{count}} tâches dans {{columns}} projets",
+    "groupBy": {
+      "label": "Grouper les tâches par",
+      "stage": "Par étape",
+      "project": "Par projet"
+    },
+    "showClosed": "Tâches clôturées",
+    "closedHidden_one": "{{count}} tâche clôturée masquée",
+    "closedHidden_other": "{{count}} tâches clôturées masquées"
+  },
+  "quickLog": {
+    "title": "Pointer du temps",
+    "date": "Date",
+    "hours": "Heures",
+    "description": "Description",
+    "submit": "Pointer",
+    "logged": "{{hours}} pointées le {{date}}"
+  },
+  "history": {
+    "subtitle": "Le temps que vous avez pointé dans Odoo sur la période.",
+    "search": "Rechercher des pointages",
+    "searchPlaceholder": "Description, tâche ou projet",
+    "refresh": "Recharger les pointages depuis Odoo",
+    "refreshError": "Impossible de recharger les pointages : {{message}}",
+    "loadError": "Impossible de charger vos pointages",
+    "lineCount_one": "{{count}} ligne de pointage",
+    "lineCount_other": "{{count}} lignes de pointage",
+    "exportCsv": "Exporter en CSV",
+    "exported_one": "{{count}} ligne exportée",
+    "exported_other": "{{count}} lignes exportées",
+    "truncated": "Seules les 2 000 lignes les plus récentes par instance sont affichées. Choisissez une période plus courte pour toutes les voir.",
+    "summaryLabel": "Résumé de la période",
+    "totalHours": "Total",
+    "averagePerDay": "Moyenne par jour pointé",
+    "targetMet": "Objectif journalier atteint",
+    "fullDays": "Jours à {{target}}",
+    "chartCaption": "Heures par jour. La ligne pointillée marque la journée de {{target}}.",
+    "dayComplete": "Journée complète",
+    "dayShort": "{{hours}} manquantes",
+    "emptyTitle": "Aucun temps pointé sur cette période",
+    "emptyDescription": "Choisissez une autre période, ou pointez depuis la feuille de temps ou le Kanban.",
+    "noMatch": "Aucune ligne ne correspond à ces filtres",
+    "noMatchHint": "Essayez une autre recherche, ou affichez toutes les instances.",
+    "actionsFor": "Actions pour {{line}}",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "grid": {
+      "caption": "Heures par tâche et par jour",
+      "total": "Total",
+      "dayTotal": "Total du jour",
+      "missingDay": "Rien de pointé sur ce jour ouvré",
+      "tooLong": "La grille affiche jusqu'à {{count}} jours. Choisissez une période plus courte, ou utilisez la liste."
+    },
+    "view": {
+      "label": "Affichage",
+      "list": "Liste",
+      "grid": "Grille"
+    },
+    "locked": "Validé dans Odoo : ne peut plus être modifié."
+  },
+  "editTimesheet": {
+    "title": "Modifier le pointage",
+    "hours": "Heures",
+    "description": "Description",
+    "save": "Enregistrer",
+    "saved": "Pointage mis à jour dans Odoo"
+  },
+  "deleteTimesheet": {
+    "title": "Supprimer ce pointage d'Odoo ?",
+    "description": "Les {{hours}} pointées le {{date}} seront supprimées d'Odoo. Cette action est irréversible.",
+    "confirm": "Supprimer d'Odoo",
+    "deleted": "Pointage supprimé d'Odoo",
+    "backInList": "La ligne de {{hours}} reste dans votre liste, prête à être renvoyée."
+  },
+  "dayLoad": {
+    "checking": "Vérification des pointages de ce jour dans Odoo",
+    "nothingYet": "Rien n'est encore pointé dans Odoo ce jour-là.",
+    "already": "Déjà pointé ce jour-là : {{day}}, dont {{task}} sur cette tâche.",
+    "duplicate": "Une ligne avec la même description existe déjà sur cette tâche ce jour-là.",
+    "tooLong": "Avec cette ligne, la journée atteindrait {{total}} (plus de {{limit}})."
+  },
+  "completeDay": {
+    "title": "Compléter la journée",
+    "description": "Il manque {{hours}} le {{date}} pour une journée complète. Choisissez la tâche sur laquelle les pointer.",
+    "button": "Compléter",
+    "buttonFor": "Compléter le {{date}}",
+    "task": "Tâche",
+    "searchTask": "Rechercher une tâche ou un projet",
+    "otherTasks": "Autres tâches qui vous sont assignées",
+    "loadingTasks": "Chargement de vos tâches",
+    "noTask": "Aucune tâche ne correspond",
+    "logged": "{{hours}} pointées le {{date}}"
+  },
+  "estimate": {
+    "button": "Répartir les heures",
+    "hint": "Répartit une journée de 8 h sur les lignes à envoyer de chaque jour, selon le temps entre les commits. Les heures que vous avez saisies et les lignes déjà dans Odoo ne changent pas.",
+    "done": "Heures réparties sur la journée",
+    "doneHint": "Les lignes sont estimées d'après le temps entre les commits. Corrigez-en une si besoin : votre valeur sera conservée."
+  },
+  "reminder": {
+    "title": "Rappel quotidien",
+    "description": "Les jours ouvrés, recevez un e-mail si moins de 8 h sont pointées dans vos instances Odoo à l'heure choisie.",
+    "enabled": "M'envoyer un e-mail si ma journée n'est pas complète",
+    "hour": "Vérifier à",
+    "hourOption": "{{hour}} h",
+    "timezone": "Fuseau horaire : {{timezone}}",
+    "save": "Enregistrer le rappel",
+    "savedOn": "Rappel activé",
+    "savedOff": "Rappel désactivé",
+    "saveError": "Impossible d'enregistrer le rappel",
+    "loadError": "Impossible de charger le rappel : {{message}}"
   }
 }

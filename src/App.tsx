@@ -1,23 +1,30 @@
-import { useState } from "react"
+import { useEffect } from "react"
 import { Loader2Icon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { CenteredScreen } from "@/components/CenteredScreen"
 import { SettingsProvider } from "@/contexts/SettingsContext"
+import { useHashNavigation } from "@/hooks/useHashNavigation"
 import { useSession } from "@/hooks/useSession"
 import { useTimesheet } from "@/hooks/useTimesheet"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
 import { SignInPage } from "@/pages/auth/SignInPage"
+import { HistoryPage } from "@/pages/history/HistoryPage"
+import { KanbanPage } from "@/pages/kanban/KanbanPage"
 import { SettingsPage } from "@/pages/settings/SettingsPage"
 import { TimesheetPage } from "@/pages/timesheet/TimesheetPage"
 import { signOut } from "@/services/authService"
-import type { AppView } from "@/types/navigation"
+import { clearOdooCache } from "@/services/odooService"
 
 function Workspace({ userEmail }: { userEmail: string }) {
   const { t } = useTranslation()
-  const [view, setView] = useState<AppView>("timesheet")
+  const { view, navigate } = useHashNavigation()
   const timesheet = useTimesheet()
+  const openSettings = (): void => navigate("settings")
+
+  // Cached Odoo reads belong to this account: drop them when it leaves.
+  useEffect(() => clearOdooCache, [])
 
   const handleSignOut = async (): Promise<void> => {
     try {
@@ -29,21 +36,29 @@ function Workspace({ userEmail }: { userEmail: string }) {
     }
   }
 
+  const renderView = () => {
+    switch (view) {
+      case "timesheet":
+        return (
+          <TimesheetPage timesheet={timesheet} onOpenSettings={openSettings} />
+        )
+      case "kanban":
+        return <KanbanPage onOpenSettings={openSettings} />
+      case "history":
+        return <HistoryPage onOpenSettings={openSettings} />
+      case "settings":
+        return <SettingsPage />
+    }
+  }
+
   return (
     <DashboardLayout
       activeView={view}
-      onNavigate={setView}
+      onNavigate={navigate}
       userEmail={userEmail}
       onSignOut={handleSignOut}
     >
-      {view === "timesheet" ? (
-        <TimesheetPage
-          timesheet={timesheet}
-          onOpenSettings={() => setView("settings")}
-        />
-      ) : (
-        <SettingsPage />
-      )}
+      {renderView()}
     </DashboardLayout>
   )
 }

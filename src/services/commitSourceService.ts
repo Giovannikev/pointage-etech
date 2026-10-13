@@ -41,5 +41,6 @@ export async function fetchCommits(period: CommitPeriod): Promise<RawCommit[]> {
   return data.commits.map(toGithubCommit).map(({ message, authoredAt }) => ({
     message,
     date: toIsoDate(new Date(authoredAt)),
+    authoredAt,
   }))
 }

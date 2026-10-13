@@ -108,7 +108,7 @@ Build them with:
 
 ```bash
 cd supabase/functions
-for fn in user-settings github-commits odoo-gateway; do
+for fn in user-settings github-commits odoo-gateway daily-reminder; do
   npx esbuild@0.25 "$fn/index.ts" --bundle --format=esm --platform=neutral \
     --target=es2022 --external:'npm:*' --outfile="../../dist-functions/$fn.ts"
 done
@@ -127,6 +127,7 @@ pnpm dlx supabase link --project-ref <ref>
 pnpm dlx supabase db push
 pnpm dlx supabase secrets set CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 pnpm dlx supabase functions deploy user-settings github-commits odoo-gateway
+pnpm dlx supabase functions deploy daily-reminder --no-verify-jwt   # see Daily reminder
 ```
 
 ### Edge Function secrets
@@ -264,11 +265,63 @@ it is kept as written. A description edited by hand is never regenerated.
 | `FIND_TIMESHEETS`  | `lookups` (500 max)       | The user's timesheets on those tasks/days |
 | `SUBMIT_TIMESHEET` | `entries` (100 max)       | Created timesheet id or error per line    |
 | `GET_TASK`         | `instanceIndex`, `taskId` | Name, HTML description, project and stage |
+| `GET_MY_TASKS`     | `instanceIndex?`          | Tasks assigned to the user and their stages, per instance |
+| `GET_TIMESHEET_HISTORY` | `dateFrom`, `dateTo` (366 days max), `instanceIndex?` | The user's timesheets of the period, per instance |
+| `UPDATE_TIMESHEET` | `instanceIndex`, `timesheetId`, `hours`, `description` | The line as stored by Odoo |
+| `DELETE_TIMESHEET` | `instanceIndex`, `timesheetId` | The deleted line's reference |
+
+The read actions answer per instance (`{ instanceIndex, ok, ... }`), so one
+unreachable instance doesn't hide the other. `GET_MY_TASKS` detects the task
+fields of each instance (`user_id`/`user_ids`, `kanban_state`/`state`,
+`planned_hours`/`allocated_hours`, `effective_hours`) with `fields_get`, so it
+works across Odoo versions. Updates and deletions only touch lines owned by
+the signed-in user; Odoo refusals (validated timesheet...) return HTTP 409.
+
+The front end caches the task list (5 min) and the history (2 min) in memory;
+any timesheet write clears both. Views are addressed by the URL hash:
+`#timesheet`, `#kanban`, `#history`, `#settings`, and their filters follow it
+(`#kanban?group=project&projects=2:5`, `#history?from=2026-10-01&to=2026-10-31&view=grid`),
+so a reload or a shared link reopens the same view.
+
+Validated timesheets (Odoo Timesheets app, `validated` field) are shown
+locked and can't be edited or deleted from Pointage.
 
 The front end splits larger batches into several requests. Shared server code
 (auth, encryption, Odoo and GitHub clients, validation) lives in
 `supabase/functions/_shared`. The request and response types are mirrored in
 `src/types` and `supabase/functions/_shared/settings.ts`.
+
+## Daily reminder
+
+Users can turn on, in Settings, an email sent on working days when less than
+8 h is logged in their Odoo instances by a chosen hour. Setup, once:
+
+1. **Table**: run `supabase/migrations/20261014000000_reminder_preferences.sql`
+   in the SQL Editor (or `supabase db push`).
+2. **Email**: create a [Resend](https://resend.com) account, verify the
+   sending domain, and create an API key.
+3. **Secrets** (Edge Functions → Secrets): `RESEND_API_KEY`,
+   `REMINDER_FROM_EMAIL` (e.g. `Pointage <rappel@your-domain.com>`), `APP_URL`
+   (the deployed app's URL) and `CRON_SECRET` (a long random string:
+   `openssl rand -hex 32`).
+4. **Function**: deploy `daily-reminder` with **Verify JWT off**
+   (`supabase functions deploy daily-reminder --no-verify-jwt`): pg_cron
+   calls it without a user session, and the `x-cron-secret` header protects it.
+5. **Schedule**: enable the `pg_cron` and `pg_net` extensions, then run
+   `supabase/cron/daily-reminder.sql` after filling in the project reference
+   and the same `CRON_SECRET`.
+
+The function runs every 15 minutes, checks each user once per working day
+after their reminder hour (in their own time zone), and never emails when an
+Odoo instance can't be read.
+
+## Tests
+
+`pnpm test` runs the Vitest suites (`src/**/*.test.ts`) on the pure logic:
+commit parsing, Odoo reconciliation, the Kanban board, the history and its
+grid, the hours estimate, the cache and the URL parameters. The GitHub
+Actions workflow (`.github/workflows/ci.yml`) runs the type check, lint,
+tests and build on every push, and type-checks the Edge Functions with Deno.
 
 ## Languages
 

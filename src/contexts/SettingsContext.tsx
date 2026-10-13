@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react"
 
+import { clearOdooCache } from "@/services/odooService"
 import { fetchSettings, saveSettings } from "@/services/settingsService"
 import type {
   OdooInstanceSettings,
@@ -60,6 +61,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const save = useCallback(
     async (update: SettingsUpdate): Promise<SettingsView> => {
       const settings = await saveSettings(update)
+      // Instances may have changed: cached tasks and timesheets are obsolete.
+      clearOdooCache()
       setState({ status: "ready", settings })
       return settings
     },

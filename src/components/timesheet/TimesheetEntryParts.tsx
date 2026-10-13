@@ -1,6 +1,9 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
+  ListXIcon,
+  LockIcon,
+  PencilIcon,
   RotateCwIcon,
   SendIcon,
   Trash2Icon,
@@ -38,6 +41,10 @@ export interface EntryHandlers {
   onVerify: (id: string) => void
   onSubmit: (id: string) => void
   onRemove: (id: string) => void
+  /** Opens the edit dialog of a line already in Odoo. */
+  onEditInOdoo: (entry: TimesheetEntry) => void
+  /** Opens the delete confirmation of a line already in Odoo. */
+  onDeleteFromOdoo: (entry: TimesheetEntry) => void
 }
 
 interface EntryProps {
@@ -198,13 +205,82 @@ function RowAction({
   )
 }
 
+/** A line in Odoo can be edited or deleted there through the dialogs. */
+function canChangeInOdoo(entry: TimesheetEntry): boolean {
+  return (
+    isInOdoo(entry) &&
+    !entry.odooLocked &&
+    entry.task !== null &&
+    entry.odooTimesheetId !== null &&
+    entry.activity === "idle"
+  )
+}
+
+type EntryActionsProps = EntryProps &
+  Pick<
+    EntryHandlers,
+    "onVerify" | "onSubmit" | "onRemove" | "onEditInOdoo" | "onDeleteFromOdoo"
+  >
+
 export function EntryActions({
   entry,
   onVerify,
   onSubmit,
   onRemove,
-}: EntryProps & Pick<EntryHandlers, "onVerify" | "onSubmit" | "onRemove">) {
+  onEditInOdoo,
+  onDeleteFromOdoo,
+}: EntryActionsProps) {
   const { t } = useTranslation()
+
+  if (isInOdoo(entry)) {
+    const changeable = canChangeInOdoo(entry)
+    if (entry.odooLocked) {
+      return (
+        <div className="flex justify-end gap-0.5">
+          <RowAction
+            label={t("history.locked")}
+            disabled={false}
+            onClick={() => undefined}
+          >
+            <LockIcon />
+          </RowAction>
+          <RowAction
+            label={t("timesheet.removeLoggedLine")}
+            disabled={entry.activity !== "idle"}
+            onClick={() => onRemove(entry.id)}
+          >
+            <ListXIcon />
+          </RowAction>
+        </div>
+      )
+    }
+    return (
+      <div className="flex justify-end gap-0.5">
+        <RowAction
+          label={t("timesheet.editInOdoo")}
+          disabled={!changeable}
+          onClick={() => onEditInOdoo(entry)}
+        >
+          <PencilIcon />
+        </RowAction>
+        <RowAction
+          label={t("timesheet.deleteFromOdoo")}
+          disabled={!changeable}
+          onClick={() => onDeleteFromOdoo(entry)}
+          destructive
+        >
+          <Trash2Icon />
+        </RowAction>
+        <RowAction
+          label={t("timesheet.removeLoggedLine")}
+          disabled={entry.activity !== "idle"}
+          onClick={() => onRemove(entry.id)}
+        >
+          <ListXIcon />
+        </RowAction>
+      </div>
+    )
+  }
 
   return (
     <div className="flex justify-end gap-0.5">
@@ -223,11 +299,7 @@ export function EntryActions({
         <SendIcon />
       </RowAction>
       <RowAction
-        label={
-          isInOdoo(entry)
-            ? t("timesheet.removeLoggedLine")
-            : t("timesheet.removeLine")
-        }
+        label={t("timesheet.removeLine")}
         disabled={entry.activity !== "idle"}
         onClick={() => onRemove(entry.id)}
         destructive

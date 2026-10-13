@@ -74,7 +74,9 @@ export function toSettingsView(settings: UserSettings): SettingsView {
             login: settings.github.login,
             authorEmails: settings.github.authorEmails,
           },
-    odooInstances: settings.odooInstances.map(({ apiKey: _, ...view }) => view),
+    odooInstances: settings.odooInstances.map(
+      ({ index, label, url, db, login }) => ({ index, label, url, db, login })
+    ),
   }
 }
 

@@ -1,0 +1,469 @@
+import { useCallback, useMemo, useState } from "react"
+import {
+  ArchiveIcon,
+  Columns3Icon,
+  RefreshCwIcon,
+  SearchIcon,
+  TriangleAlertIcon,
+} from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
+
+import { KanbanColumn } from "@/components/kanban/KanbanColumn"
+import { ProjectFilter } from "@/components/kanban/ProjectFilter"
+import {
+  QuickLogDialog,
+  type QuickLogResult,
+} from "@/components/kanban/QuickLogDialog"
+import { SettingsGate } from "@/components/settings/SettingsGate"
+import {
+  InstanceFilter,
+  type InstanceFilterValue,
+} from "@/components/timesheet/InstanceFilter"
+import { InstanceErrorNotice } from "@/components/timesheet/InstanceErrorNotice"
+import { SetupRequiredState } from "@/components/timesheet/SetupRequiredState"
+import { TaskDetailsDialog } from "@/components/timesheet/TaskDetailsDialog"
+import { Button } from "@/components/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Toggle } from "@/components/ui/toggle"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import { useOdooInstances } from "@/contexts/SettingsContext"
+import { useCachedQuery } from "@/hooks/useCachedQuery"
+import { useDialogTarget } from "@/hooks/useDialogTarget"
+import { useFormatters } from "@/hooks/useFormatters"
+import { useTaskDetails } from "@/hooks/useTaskDetails"
+import { useSyncViewParams } from "@/hooks/useViewParams"
+import { cn } from "@/lib/utils"
+import { fetchMyTasks, peekMyTasks } from "@/services/odooService"
+import type {
+  KanbanTask,
+  MyTasksInstanceResult,
+  OdooTaskMatch,
+} from "@/types/timesheet"
+import {
+  buildBoard,
+  countClosedTasks,
+  listProjects,
+  type BoardGrouping,
+} from "@/utils/kanban"
+import {
+  formatInstanceParam,
+  parseInstanceParam,
+  readViewParams,
+} from "@/utils/viewParams"
+
+/** "1:12" (instance:project id) or "none". */
+const PROJECT_KEY_PARAM = /^(?:[12]:\d+|none)$/
+
+/** The board's filters as found in the URL when the page opens. */
+function readInitialFilters() {
+  const params = readViewParams()
+  return {
+    instance: parseInstanceParam(params.get("instance")),
+    query: params.get("q") ?? "",
+    projects: new Set(
+      (params.get("projects") ?? "")
+        .split(",")
+        .filter((key) => PROJECT_KEY_PARAM.test(key))
+    ),
+    groupBy: (params.get("group") === "project"
+      ? "project"
+      : "stage") as BoardGrouping,
+    showClosed: params.get("closed") === "1",
+  }
+}
+
+const MY_TASKS_QUERY_KEY = "myTasks"
+
+function BoardSkeleton() {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="flex gap-3 overflow-hidden"
+      aria-label={t("common.loading")}
+    >
+      {[4, 3, 2].map((cards, column) => (
+        <div
+          key={column}
+          className="grid w-72 shrink-0 content-start gap-2 rounded-xl bg-muted/50 p-3 sm:w-80"
+        >
+          <Skeleton className="mb-1 h-4 w-28" />
+          {Array.from({ length: cards }, (_, card) => (
+            <Skeleton key={card} className="h-28 w-full rounded-lg" />
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Converts a board task for the shared task details dialog. */
+function toTaskMatch(task: KanbanTask): OdooTaskMatch {
+  return {
+    taskId: task.taskId,
+    taskName: task.name,
+    projectId: task.projectId ?? 0,
+    projectName: task.projectName ?? "",
+    instanceIndex: task.instanceIndex,
+  }
+}
+
+function KanbanWorkspace() {
+  const { t } = useTranslation()
+  const { formatHours, formatShortDate } = useFormatters()
+  const instances = useOdooInstances()
+  const [initial] = useState(readInitialFilters)
+  const [instance, setInstance] = useState<InstanceFilterValue>(
+    initial.instance
+  )
+  const [query, setQuery] = useState(initial.query)
+  /** Selected project keys; empty means every project. */
+  const [projects, setProjects] = useState<ReadonlySet<string>>(
+    initial.projects
+  )
+  const [groupBy, setGroupBy] = useState<BoardGrouping>(initial.groupBy)
+  const [showClosed, setShowClosed] = useState(initial.showClosed)
+
+  useSyncViewParams("kanban", {
+    instance: formatInstanceParam(instance),
+    q: query.trim(),
+    projects: [...projects].sort().join(","),
+    group: groupBy === "project" ? "project" : null,
+    closed: showClosed ? "1" : null,
+  })
+  /** Columns whose folded state the user flipped, keyed by column key. */
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set())
+  const quickLog = useDialogTarget<KanbanTask>()
+  const taskDetails = useTaskDetails()
+
+  const fetcher = useCallback(
+    ({ force }: { force: boolean }) => fetchMyTasks({ force }),
+    []
+  )
+  const tasksQuery = useCachedQuery<MyTasksInstanceResult[]>(
+    MY_TASKS_QUERY_KEY,
+    fetcher,
+    peekMyTasks
+  )
+  const { data, refresh } = tasksQuery
+
+  const projectOptions = useMemo(
+    () =>
+      data === undefined ? [] : listProjects(data, { instance, showClosed }),
+    [data, instance, showClosed]
+  )
+  const columns = useMemo(
+    () =>
+      data === undefined
+        ? []
+        : buildBoard(data, {
+            instance,
+            showClosed,
+            query,
+            projects,
+            groupBy,
+          }),
+    [data, instance, showClosed, query, projects, groupBy]
+  )
+  const closedCount = useMemo(
+    () => (data === undefined ? 0 : countClosedTasks(data, instance)),
+    [data, instance]
+  )
+
+  // Another instance has other projects: the selection no longer applies.
+  const changeInstance = (next: InstanceFilterValue): void => {
+    setInstance(next)
+    setProjects(new Set())
+  }
+  const failures = (data ?? []).filter(
+    (result): result is Extract<MyTasksInstanceResult, { ok: false }> =>
+      !result.ok
+  )
+  const isTruncated = (data ?? []).some(
+    (result) => result.ok && result.truncated
+  )
+  const taskCount = columns.reduce(
+    (sum, column) => sum + column.tasks.length,
+    0
+  )
+  const hasAnyTask = (data ?? []).some(
+    (result) => result.ok && result.tasks.length > 0
+  )
+
+  const toggleColumn = useCallback((key: string): void => {
+    setToggled((current) => {
+      const next = new Set(current)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [])
+
+  const handleLogged = ({ task, hours, date }: QuickLogResult): void => {
+    quickLog.close()
+    toast.success(
+      t("quickLog.logged", {
+        hours: formatHours(hours),
+        date: formatShortDate(date),
+      }),
+      { description: task.name }
+    )
+    // Logged hours changed in Odoo: read the tasks again.
+    refresh()
+  }
+
+  const renderBoard = () => {
+    if (tasksQuery.isLoading) {
+      return <BoardSkeleton />
+    }
+    if (data === undefined) {
+      return (
+        <Empty className="border border-dashed">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <TriangleAlertIcon />
+            </EmptyMedia>
+            <EmptyTitle>{t("kanban.loadError")}</EmptyTitle>
+            <EmptyDescription>{tasksQuery.error}</EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Button
+              variant="outline"
+              onClick={refresh}
+              disabled={tasksQuery.isRefreshing}
+            >
+              {t("common.tryAgain")}
+            </Button>
+          </EmptyContent>
+        </Empty>
+      )
+    }
+    if (columns.length === 0) {
+      return (
+        <Empty className="border border-dashed">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <Columns3Icon />
+            </EmptyMedia>
+            <EmptyTitle>
+              {hasAnyTask ? t("kanban.noMatch") : t("kanban.emptyTitle")}
+            </EmptyTitle>
+            <EmptyDescription>
+              {hasAnyTask
+                ? t("kanban.noMatchHint")
+                : t("kanban.emptyDescription")}
+            </EmptyDescription>
+          </EmptyHeader>
+          {hasAnyTask && (
+            <EmptyContent>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setQuery("")
+                  setInstance("all")
+                  setProjects(new Set())
+                  setShowClosed(true)
+                }}
+              >
+                {t("common.clearFilters")}
+              </Button>
+            </EmptyContent>
+          )}
+        </Empty>
+      )
+    }
+    return (
+      // Bleeds to the page edges so the columns scroll under the padding.
+      <div
+        className="-mx-4 overflow-x-auto px-4 pb-3 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8"
+        tabIndex={0}
+        role="region"
+        aria-label={t("kanban.boardLabel")}
+      >
+        <div className="flex w-max items-start gap-3">
+          {columns.map((column) => (
+            <KanbanColumn
+              key={column.key}
+              column={column}
+              isCollapsed={column.folded !== toggled.has(column.key)}
+              showInstance={instance === "all" && instances.length > 1}
+              onToggleCollapsed={toggleColumn}
+              onOpenTask={(task) => taskDetails.open(toTaskMatch(task))}
+              onLogTime={quickLog.open}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <div className="grid gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="grid gap-1">
+            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
+              {t("kanban.title")}
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              {data === undefined
+                ? t("kanban.subtitle")
+                : t(
+                    groupBy === "project"
+                      ? "kanban.summaryByProject"
+                      : "kanban.summary",
+                    { count: taskCount, columns: columns.length }
+                  )}
+            </p>
+          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={t("kanban.refresh")}
+                onClick={refresh}
+                disabled={tasksQuery.isLoading || tasksQuery.isRefreshing}
+              >
+                <RefreshCwIcon
+                  className={cn(tasksQuery.isRefreshing && "animate-spin")}
+                />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("kanban.refresh")}</TooltipContent>
+          </Tooltip>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <InstanceFilter value={instance} onChange={changeInstance} />
+          {projectOptions.length > 0 && (
+            <ProjectFilter
+              options={projectOptions}
+              value={projects}
+              onChange={setProjects}
+              showInstance={instance === "all" && instances.length > 1}
+            />
+          )}
+          <div className="relative w-full sm:w-72">
+            <SearchIcon
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              type="search"
+              value={query}
+              placeholder={t("kanban.searchPlaceholder")}
+              aria-label={t("kanban.search")}
+              className="pl-8"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label={t("kanban.groupBy.label")}
+            value={groupBy}
+            onValueChange={(value) => {
+              if (value === "stage" || value === "project") {
+                setGroupBy(value)
+              }
+            }}
+          >
+            <ToggleGroupItem value="stage">
+              {t("kanban.groupBy.stage")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="project">
+              {t("kanban.groupBy.project")}
+            </ToggleGroupItem>
+          </ToggleGroup>
+          <Toggle
+            variant="outline"
+            size="sm"
+            pressed={showClosed}
+            onPressedChange={setShowClosed}
+          >
+            <ArchiveIcon />
+            {t("kanban.showClosed")}
+          </Toggle>
+          {!showClosed && closedCount > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {t("kanban.closedHidden", { count: closedCount })}
+            </span>
+          )}
+        </div>
+
+        {failures.map((failure) => (
+          <InstanceErrorNotice
+            key={failure.instanceIndex}
+            instanceIndex={failure.instanceIndex}
+            message={failure.error}
+          />
+        ))}
+        {data !== undefined && tasksQuery.error !== null && (
+          <p role="alert" className="text-sm text-destructive">
+            {t("kanban.refreshError", { message: tasksQuery.error })}
+          </p>
+        )}
+        {isTruncated && (
+          <p className="text-sm text-muted-foreground">
+            {t("kanban.truncated")}
+          </p>
+        )}
+      </div>
+
+      {renderBoard()}
+
+      <QuickLogDialog
+        open={quickLog.isOpen}
+        task={quickLog.target}
+        onOpenChange={(open) => !open && quickLog.close()}
+        onLogged={handleLogged}
+      />
+      <TaskDetailsDialog
+        state={taskDetails.state}
+        onClose={taskDetails.close}
+      />
+    </>
+  )
+}
+
+interface KanbanPageProps {
+  onOpenSettings: () => void
+}
+
+export function KanbanPage({ onOpenSettings }: KanbanPageProps) {
+  return (
+    <main className="grid w-full min-w-0 content-start gap-6 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      <SettingsGate>
+        {(settings) =>
+          settings.odooInstances.length > 0 ? (
+            <KanbanWorkspace />
+          ) : (
+            <SetupRequiredState onOpenSettings={onOpenSettings} />
+          )
+        }
+      </SettingsGate>
+    </main>
+  )
+}

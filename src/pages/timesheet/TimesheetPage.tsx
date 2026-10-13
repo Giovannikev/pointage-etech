@@ -3,6 +3,7 @@ import {
   ClipboardPasteIcon,
   GitCommitHorizontalIcon,
   Loader2Icon,
+  WandSparklesIcon,
 } from "lucide-react"
 import type { TFunction } from "i18next"
 import { useTranslation } from "react-i18next"
@@ -16,6 +17,11 @@ import { TimesheetActionBar } from "@/components/timesheet/TimesheetActionBar"
 import { TimesheetEmptyState } from "@/components/timesheet/TimesheetEmptyState"
 import { TimesheetTable } from "@/components/timesheet/TimesheetTable"
 import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { useFormatters } from "@/hooks/useFormatters"
 import type { UseTimesheetResult } from "@/hooks/useTimesheet"
 import type {
@@ -156,6 +162,13 @@ export function TimesheetPage({
     notifySubmission(await timesheet.submitEntry(id), t)
   }
 
+  const handleEstimate = (): void => {
+    timesheet.estimateAllHours()
+    toast.success(t("estimate.done"), {
+      description: t("estimate.doneHint"),
+    })
+  }
+
   const handleSubmitAll = async (): Promise<void> => {
     notifySubmission(await timesheet.submitAll(), t)
   }
@@ -178,6 +191,23 @@ export function TimesheetPage({
             disabled={timesheet.isImporting}
           />
           <div className="flex flex-wrap gap-2 max-sm:w-full *:max-sm:flex-1">
+            {hasEntries && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    onClick={handleEstimate}
+                    disabled={timesheet.estimableCount === 0}
+                  >
+                    <WandSparklesIcon />
+                    {t("estimate.button")}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  {t("estimate.hint")}
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Button variant="outline" onClick={openImportModal}>
               <ClipboardPasteIcon />
               {t("timesheet.pasteCommits")}
@@ -207,6 +237,8 @@ export function TimesheetPage({
           onVerify={handleVerify}
           onSubmit={handleSubmit}
           onRemove={timesheet.removeEntry}
+          onUpdateInOdoo={timesheet.updateInOdoo}
+          onDeleteFromOdoo={timesheet.deleteFromOdoo}
         />
       ) : (
         <TimesheetEmptyState />

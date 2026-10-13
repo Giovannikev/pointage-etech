@@ -1,15 +1,31 @@
 import {
+  cacheKey,
+  odooCache,
+  type CacheKey,
+  type CacheReadOptions,
+} from "@/lib/odooCache"
+import {
   InvalidResponseError,
   invokeFunction,
 } from "@/services/edgeFunctionClient"
 import type {
+  CommitPeriod,
   GatewayRequest,
+  InstanceResult,
+  KanbanStage,
+  KanbanTask,
+  KanbanTaskStatus,
   LoggedTimesheet,
+  MyTasksInstanceResult,
   OdooInstanceIndex,
   SubmissionResult,
   TaskDetails,
   TaskSearchResult,
+  TimesheetChanges,
+  TimesheetHistoryEntry,
+  TimesheetHistoryInstanceResult,
   TimesheetLookup,
+  TimesheetReference,
   TimesheetSubmission,
 } from "@/types/timesheet"
 import { isPositiveInteger, isRecord } from "@/utils/guards"
@@ -109,6 +125,8 @@ function toLoggedTimesheet(value: unknown): LoggedTimesheet {
       timesheetId: value.timesheetId,
       hours: value.hours,
       description: value.description,
+      // Older gateways don't send it: unknown means not locked.
+      locked: value.locked === true,
     }
   }
   throw new InvalidResponseError(GATEWAY_FUNCTION)
@@ -124,14 +142,19 @@ export function searchTasks(taskRefs: string[]): Promise<TaskSearchResult[]> {
 }
 
 /** Creates the timesheet lines in their Odoo instance; results are per entry. */
-export function submitTimesheets(
+export async function submitTimesheets(
   entries: TimesheetSubmission[]
 ): Promise<SubmissionResult[]> {
-  return inBatches(entries, MAX_ITEMS_PER_REQUEST, async (batch) =>
-    readResults(
-      await invokeGateway({ action: "SUBMIT_TIMESHEET", entries: batch })
-    ).map(toSubmissionResult)
-  )
+  try {
+    return await inBatches(entries, MAX_ITEMS_PER_REQUEST, async (batch) =>
+      readResults(
+        await invokeGateway({ action: "SUBMIT_TIMESHEET", entries: batch })
+      ).map(toSubmissionResult)
+    )
+  } finally {
+    // Even a partial failure may have created lines.
+    invalidateTimesheetReads()
+  }
 }
 
 /** The signed-in user's existing timesheets on these tasks and days. */
@@ -176,4 +199,296 @@ export async function fetchTaskDetails(
     }
   }
   throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+/* ------------------------------------------------------------------ */
+/* Cache                                                               */
+/* ------------------------------------------------------------------ */
+
+const MY_TASKS_TTL_MS = 5 * 60_000
+const HISTORY_TTL_MS = 2 * 60_000
+
+const MY_TASKS_KEY: CacheKey<MyTasksInstanceResult[]> = cacheKey("myTasks")
+const HISTORY_PREFIX = "history:"
+
+function historyKey(
+  period: CommitPeriod
+): CacheKey<TimesheetHistoryInstanceResult[]> {
+  return cacheKey(`${HISTORY_PREFIX}${period.from}:${period.to}`)
+}
+
+/** Forgets every cached Odoo read, e.g. after the settings changed. */
+export function clearOdooCache(): void {
+  odooCache.clear()
+}
+
+/** Timesheets changed in Odoo: hours on tasks and the history are stale. */
+function invalidateTimesheetReads(): void {
+  odooCache.invalidate(HISTORY_PREFIX)
+  odooCache.invalidate(MY_TASKS_KEY.id)
+}
+
+/* ------------------------------------------------------------------ */
+/* Response parsing shared by the per-instance actions                 */
+/* ------------------------------------------------------------------ */
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value))
+}
+
+function isNullableId(value: unknown): value is number | null {
+  return value === null || isPositiveInteger(value)
+}
+
+function readInstanceResults(data: unknown): unknown[] {
+  if (isRecord(data) && Array.isArray(data.instances)) {
+    return data.instances
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toInstanceResult<T>(
+  value: unknown,
+  readData: (record: Record<string, unknown>) => T
+): InstanceResult<T> {
+  if (!isRecord(value) || !isInstanceIndex(value.instanceIndex)) {
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  }
+  if (value.ok === false && typeof value.error === "string") {
+    return { instanceIndex: value.instanceIndex, ok: false, error: value.error }
+  }
+  if (value.ok === true) {
+    return { instanceIndex: value.instanceIndex, ok: true, ...readData(value) }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function readList<T>(value: unknown, readItem: (item: unknown) => T): T[] {
+  if (!Array.isArray(value)) {
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  }
+  return value.map(readItem)
+}
+
+/* ------------------------------------------------------------------ */
+/* GET_MY_TASKS                                                        */
+/* ------------------------------------------------------------------ */
+
+const KANBAN_STATUSES: readonly KanbanTaskStatus[] = [
+  "in_progress",
+  "changes_requested",
+  "approved",
+  "done",
+  "canceled",
+  "waiting",
+  "blocked",
+]
+
+function isKanbanStatus(value: unknown): value is KanbanTaskStatus {
+  return KANBAN_STATUSES.some((status) => status === value)
+}
+
+function toKanbanTask(value: unknown): KanbanTask {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.taskId) &&
+    typeof value.name === "string" &&
+    isNullableId(value.projectId) &&
+    isNullableString(value.projectName) &&
+    isNullableId(value.stageId) &&
+    isNullableString(value.stageName) &&
+    typeof value.priority === "number" &&
+    isNullableString(value.deadline) &&
+    (value.status === null || isKanbanStatus(value.status)) &&
+    isNullableNumber(value.plannedHours) &&
+    isNullableNumber(value.effectiveHours)
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      taskId: value.taskId,
+      name: value.name,
+      projectId: value.projectId,
+      projectName: value.projectName,
+      stageId: value.stageId,
+      stageName: value.stageName,
+      priority: value.priority,
+      deadline: value.deadline,
+      status: value.status,
+      plannedHours: value.plannedHours,
+      effectiveHours: value.effectiveHours,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toKanbanStage(value: unknown): KanbanStage {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.stageId) &&
+    typeof value.name === "string" &&
+    typeof value.sequence === "number" &&
+    typeof value.folded === "boolean"
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      stageId: value.stageId,
+      name: value.name,
+      sequence: value.sequence,
+      folded: value.folded,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toMyTasksResult(value: unknown): MyTasksInstanceResult {
+  return toInstanceResult(value, (record) => ({
+    tasks: readList(record.tasks, toKanbanTask),
+    stages: readList(record.stages, toKanbanStage),
+    truncated: record.truncated === true,
+  }))
+}
+
+/** Cached for a few minutes; pass `force` to read Odoo again. */
+export function fetchMyTasks(
+  options: CacheReadOptions = {}
+): Promise<MyTasksInstanceResult[]> {
+  return odooCache.getOrFetch(
+    MY_TASKS_KEY,
+    MY_TASKS_TTL_MS,
+    async () =>
+      readInstanceResults(await invokeGateway({ action: "GET_MY_TASKS" })).map(
+        toMyTasksResult
+      ),
+    options
+  )
+}
+
+/** The cached tasks, if fresh: lets a page render without a loading state. */
+export function peekMyTasks(): MyTasksInstanceResult[] | undefined {
+  return odooCache.peek(MY_TASKS_KEY)
+}
+
+/* ------------------------------------------------------------------ */
+/* GET_TIMESHEET_HISTORY                                               */
+/* ------------------------------------------------------------------ */
+
+function toHistoryEntry(value: unknown): TimesheetHistoryEntry {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.timesheetId) &&
+    typeof value.date === "string" &&
+    typeof value.description === "string" &&
+    typeof value.hours === "number" &&
+    isNullableId(value.projectId) &&
+    isNullableString(value.projectName) &&
+    isNullableId(value.taskId) &&
+    isNullableString(value.taskName)
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      timesheetId: value.timesheetId,
+      date: value.date,
+      description: value.description,
+      hours: value.hours,
+      projectId: value.projectId,
+      projectName: value.projectName,
+      taskId: value.taskId,
+      taskName: value.taskName,
+      locked: value.locked === true,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toHistoryResult(value: unknown): TimesheetHistoryInstanceResult {
+  return toInstanceResult(value, (record) => ({
+    entries: readList(record.entries, toHistoryEntry),
+    truncated: record.truncated === true,
+  }))
+}
+
+/** The user's timesheets of the period in every instance; cached briefly. */
+export function fetchTimesheetHistory(
+  period: CommitPeriod,
+  options: CacheReadOptions = {}
+): Promise<TimesheetHistoryInstanceResult[]> {
+  return odooCache.getOrFetch(
+    historyKey(period),
+    HISTORY_TTL_MS,
+    async () =>
+      readInstanceResults(
+        await invokeGateway({
+          action: "GET_TIMESHEET_HISTORY",
+          dateFrom: period.from,
+          dateTo: period.to,
+        })
+      ).map(toHistoryResult),
+    options
+  )
+}
+
+export function peekTimesheetHistory(
+  period: CommitPeriod
+): TimesheetHistoryInstanceResult[] | undefined {
+  return odooCache.peek(historyKey(period))
+}
+
+/* ------------------------------------------------------------------ */
+/* Writes                                                              */
+/* ------------------------------------------------------------------ */
+
+/** Logs time on one task (Kanban quick log). */
+export async function logTime(
+  submission: TimesheetSubmission
+): Promise<number> {
+  const [result] = await submitTimesheets([submission])
+  if (result === undefined) {
+    throw new Error("Odoo didn't return a result for this line.")
+  }
+  if (!result.success) {
+    throw new Error(result.error)
+  }
+  return result.timesheetId
+}
+
+/** Changes the hours and description of one of the user's timesheets. */
+export async function updateTimesheet(
+  reference: TimesheetReference,
+  changes: TimesheetChanges
+): Promise<TimesheetHistoryEntry> {
+  const data = await invokeGateway({
+    action: "UPDATE_TIMESHEET",
+    instanceIndex: reference.instanceIndex,
+    timesheetId: reference.timesheetId,
+    hours: changes.hours,
+    description: changes.description.trim(),
+  })
+  invalidateTimesheetReads()
+  if (isRecord(data)) {
+    return toHistoryEntry(data.timesheet)
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+/** Deletes one of the user's timesheets in Odoo. */
+export async function deleteTimesheet(
+  reference: TimesheetReference
+): Promise<void> {
+  const data = await invokeGateway({
+    action: "DELETE_TIMESHEET",
+    instanceIndex: reference.instanceIndex,
+    timesheetId: reference.timesheetId,
+  })
+  invalidateTimesheetReads()
+  const deleted = isRecord(data) ? data.deleted : null
+  if (
+    !isRecord(deleted) ||
+    deleted.timesheetId !== reference.timesheetId ||
+    deleted.instanceIndex !== reference.instanceIndex
+  ) {
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  }
 }

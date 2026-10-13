@@ -73,3 +73,15 @@ export function formatMediumDate(isoDate: string, locale: string): string {
     year: "numeric",
   })
 }
+
+/**
+ * Local calendar day of an Odoo date ("2026-10-15") or of a UTC timestamp
+ * ("2026-10-14T21:00:00Z" is the 15th in Madagascar, UTC+3).
+ */
+export function toLocalIsoDate(value: string): string {
+  if (ISO_DATE.test(value)) {
+    return value
+  }
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value.slice(0, 10) : toIsoDate(parsed)
+}

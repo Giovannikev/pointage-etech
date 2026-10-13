@@ -1,5 +1,9 @@
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 
+import { DeleteTimesheetDialog } from "@/components/timesheet/DeleteTimesheetDialog"
+import type { EditableTimesheet } from "@/components/timesheet/editableTimesheet"
+import { EditTimesheetDialog } from "@/components/timesheet/EditTimesheetDialog"
 import { StatusBadge } from "@/components/timesheet/StatusBadge"
 import { TaskDetailsDialog } from "@/components/timesheet/TaskDetailsDialog"
 import {
@@ -19,12 +23,38 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useDialogTarget } from "@/hooks/useDialogTarget"
 import { useFormatters } from "@/hooks/useFormatters"
 import { useTaskDetails } from "@/hooks/useTaskDetails"
-import type { TimesheetEntry } from "@/types/timesheet"
+import type { TimesheetChanges, TimesheetEntry } from "@/types/timesheet"
 
-type TimesheetTableProps = Omit<EntryHandlers, "onOpenTask"> & {
+type TimesheetTableProps = Omit<
+  EntryHandlers,
+  "onOpenTask" | "onEditInOdoo" | "onDeleteFromOdoo"
+> & {
   entries: TimesheetEntry[]
+  /** Saves an edit of a line already in Odoo; rejects with Odoo's message. */
+  onUpdateInOdoo: (id: string, changes: TimesheetChanges) => Promise<void>
+  /** Deletes a line from Odoo; rejects with Odoo's message. */
+  onDeleteFromOdoo: (id: string) => Promise<void>
+}
+
+/** A line in Odoo, with the id of the list entry it comes from. */
+type OdooLine = EditableTimesheet & { entryId: string }
+
+function toOdooLine(entry: TimesheetEntry): OdooLine | null {
+  if (entry.task === null || entry.odooTimesheetId === null) {
+    return null
+  }
+  return {
+    entryId: entry.id,
+    instanceIndex: entry.task.instanceIndex,
+    timesheetId: entry.odooTimesheetId,
+    date: entry.date,
+    hours: entry.hours,
+    description: entry.description,
+    label: entry.task.taskName,
+  }
 }
 
 interface EntryLayoutProps extends EntryHandlers {
@@ -76,6 +106,8 @@ function TimesheetCard({ entry, ...handlers }: EntryLayoutProps) {
           onVerify={handlers.onVerify}
           onSubmit={handlers.onSubmit}
           onRemove={handlers.onRemove}
+          onEditInOdoo={handlers.onEditInOdoo}
+          onDeleteFromOdoo={handlers.onDeleteFromOdoo}
         />
       </div>
     </li>
@@ -122,6 +154,8 @@ function TimesheetRow({ entry, ...handlers }: EntryLayoutProps) {
           onVerify={handlers.onVerify}
           onSubmit={handlers.onSubmit}
           onRemove={handlers.onRemove}
+          onEditInOdoo={handlers.onEditInOdoo}
+          onDeleteFromOdoo={handlers.onDeleteFromOdoo}
         />
       </TableCell>
     </TableRow>
@@ -133,12 +167,59 @@ function TimesheetRow({ entry, ...handlers }: EntryLayoutProps) {
  * (a container query), not the screen, since the sidebar takes room too:
  * cards up to 72rem, in two columns from 48rem, then a table.
  */
-export function TimesheetTable({ entries, ...handlers }: TimesheetTableProps) {
+export function TimesheetTable({
+  entries,
+  onUpdateInOdoo,
+  onDeleteFromOdoo,
+  ...handlers
+}: TimesheetTableProps) {
   const { t } = useTranslation()
+  const { formatHours, formatShortDate } = useFormatters()
   const taskDetails = useTaskDetails()
+  const editDialog = useDialogTarget<OdooLine>()
+  const deleteDialog = useDialogTarget<OdooLine>()
+
+  const openFor =
+    (open: (line: OdooLine) => void) =>
+    (entry: TimesheetEntry): void => {
+      const line = toOdooLine(entry)
+      if (line !== null) {
+        open(line)
+      }
+    }
+
   const entryHandlers: EntryHandlers = {
     ...handlers,
     onOpenTask: taskDetails.open,
+    onEditInOdoo: openFor(editDialog.open),
+    onDeleteFromOdoo: openFor(deleteDialog.open),
+  }
+
+  const handleSave = async (
+    line: EditableTimesheet,
+    changes: TimesheetChanges
+  ): Promise<void> => {
+    if (editDialog.target === null) {
+      return
+    }
+    await onUpdateInOdoo(editDialog.target.entryId, changes)
+    editDialog.close()
+    toast.success(t("editTimesheet.saved"), {
+      description: `${formatShortDate(line.date)}: ${formatHours(changes.hours)}`,
+    })
+  }
+
+  const handleDelete = async (line: EditableTimesheet): Promise<void> => {
+    if (deleteDialog.target === null) {
+      return
+    }
+    await onDeleteFromOdoo(deleteDialog.target.entryId)
+    deleteDialog.close()
+    toast.success(t("deleteTimesheet.deleted"), {
+      description: t("deleteTimesheet.backInList", {
+        hours: formatHours(line.hours),
+      }),
+    })
   }
 
   return (
@@ -186,6 +267,18 @@ export function TimesheetTable({ entries, ...handlers }: TimesheetTableProps) {
       <TaskDetailsDialog
         state={taskDetails.state}
         onClose={taskDetails.close}
+      />
+      <EditTimesheetDialog
+        open={editDialog.isOpen}
+        timesheet={editDialog.target}
+        onOpenChange={(open) => !open && editDialog.close()}
+        onSave={handleSave}
+      />
+      <DeleteTimesheetDialog
+        open={deleteDialog.isOpen}
+        timesheet={deleteDialog.target}
+        onOpenChange={(open) => !open && deleteDialog.close()}
+        onConfirm={handleDelete}
       />
     </div>
   )

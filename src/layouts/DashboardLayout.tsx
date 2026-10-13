@@ -8,6 +8,8 @@ import type { AppView } from "@/types/navigation"
 
 const VIEW_TITLE_KEYS = {
   timesheet: "nav.timesheet",
+  kanban: "nav.kanban",
+  history: "nav.history",
   settings: "nav.settings",
 } as const satisfies Record<AppView, string>
 

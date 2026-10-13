@@ -9,6 +9,10 @@
  *   { action: "SUBMIT_TIMESHEET", entries: TimesheetSubmission[] }
  *   { action: "FIND_TIMESHEETS", lookups: TimesheetLookup[] }
  *   { action: "GET_TASK", instanceIndex, taskId }
+ *   { action: "GET_MY_TASKS", instanceIndex? }
+ *   { action: "GET_TIMESHEET_HISTORY", dateFrom, dateTo, instanceIndex? }
+ *   { action: "UPDATE_TIMESHEET", instanceIndex, timesheetId, hours, description }
+ *   { action: "DELETE_TIMESHEET", instanceIndex, timesheetId }
  */
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
@@ -20,6 +24,7 @@ import {
   readMany2one,
 } from "../_shared/odoo.ts"
 import {
+  INSTANCE_INDEXES,
   type InstanceIndex,
   type OdooInstanceSettings,
   requireOdooInstances,
@@ -71,6 +76,8 @@ interface LoggedTimesheet extends TimesheetLookup {
   timesheetId: number
   hours: number
   description: string
+  /** Validated in Odoo (Timesheets app): it can't be changed anymore. */
+  locked: boolean
 }
 
 interface TaskReference {
@@ -87,11 +94,104 @@ interface TaskDetails {
   stageName: string | null
 }
 
+/** Task state, normalized across Odoo versions (kanban_state up to 16, state from 17). */
+type KanbanTaskStatus =
+  | "in_progress"
+  | "changes_requested"
+  | "approved"
+  | "done"
+  | "canceled"
+  | "waiting"
+  | "blocked"
+
+interface KanbanTask {
+  instanceIndex: InstanceIndex
+  taskId: number
+  name: string
+  projectId: number | null
+  projectName: string | null
+  stageId: number | null
+  stageName: string | null
+  /** 0 is normal; 1 and more are starred. */
+  priority: number
+  /**
+   * "YYYY-MM-DD" when the field is a date (Odoo 16 and older), or an ISO UTC
+   * timestamp ("2026-10-14T21:00:00Z") when it is a datetime (Odoo 17+): the
+   * browser turns it into a local day.
+   */
+  deadline: string | null
+  status: KanbanTaskStatus | null
+  /** null when the instance has no planned hours field or none are set. */
+  plannedHours: number | null
+  /** null when timesheets aren't installed on the instance. */
+  effectiveHours: number | null
+}
+
+interface KanbanStage {
+  instanceIndex: InstanceIndex
+  stageId: number
+  name: string
+  sequence: number
+  folded: boolean
+}
+
+interface TimesheetHistoryEntry {
+  instanceIndex: InstanceIndex
+  timesheetId: number
+  /** YYYY-MM-DD */
+  date: string
+  description: string
+  hours: number
+  projectId: number | null
+  projectName: string | null
+  taskId: number | null
+  taskName: string | null
+  /** Validated in Odoo (Timesheets app): it can't be changed anymore. */
+  locked: boolean
+}
+
+/** One result per instance, so a failing instance doesn't hide the other one. */
+type InstanceResult<T> =
+  | ({ instanceIndex: InstanceIndex; ok: true } & T)
+  | { instanceIndex: InstanceIndex; ok: false; error: string }
+
+type MyTasksResult = InstanceResult<{
+  tasks: KanbanTask[]
+  stages: KanbanStage[]
+  /** True when the task limit was reached and older tasks were left out. */
+  truncated: boolean
+}>
+
+type TimesheetHistoryResult = InstanceResult<{
+  entries: TimesheetHistoryEntry[]
+  truncated: boolean
+}>
+
+interface TimesheetReference {
+  instanceIndex: InstanceIndex
+  timesheetId: number
+}
+
+interface TimesheetUpdate extends TimesheetReference {
+  hours: number
+  description: string
+}
+
+interface HistoryQuery {
+  dateFrom: string
+  dateTo: string
+  instanceIndex: InstanceIndex | null
+}
+
 type GatewayRequest =
   | { action: "SEARCH_TASK"; taskRefs: string[] }
   | { action: "SUBMIT_TIMESHEET"; entries: TimesheetSubmission[] }
   | { action: "FIND_TIMESHEETS"; lookups: TimesheetLookup[] }
   | ({ action: "GET_TASK" } & TaskReference)
+  | { action: "GET_MY_TASKS"; instanceIndex: InstanceIndex | null }
+  | ({ action: "GET_TIMESHEET_HISTORY" } & HistoryQuery)
+  | ({ action: "UPDATE_TIMESHEET" } & TimesheetUpdate)
+  | ({ action: "DELETE_TIMESHEET" } & TimesheetReference)
 
 /* ------------------------------------------------------------------ */
 /* Request validation                                                  */
@@ -105,6 +205,10 @@ const MAX_TASK_REF_LENGTH = 64
 const MAX_DESCRIPTION_LENGTH = 2_000
 const TASK_CANDIDATE_LIMIT = 20
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+const MY_TASKS_LIMIT = 1_000
+const HISTORY_LIMIT = 2_000
+const MAX_HISTORY_DAYS = 366
+const MS_PER_DAY = 86_400_000
 
 function isInstanceIndex(value: unknown): value is InstanceIndex {
   return value === 1 || value === 2
@@ -171,6 +275,74 @@ function parseSubmission(
   throw new HttpError(`Entry ${position + 1} is invalid.`, 400)
 }
 
+function isValidHours(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value <= 24
+  )
+}
+
+function isIsoDate(value: unknown): value is string {
+  if (typeof value !== "string" || !ISO_DATE.test(value)) {
+    return false
+  }
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  )
+}
+
+/** An omitted instance index means every configured instance. */
+function readOptionalInstance(value: unknown): InstanceIndex | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+  if (isInstanceIndex(value)) {
+    return value
+  }
+  throw new HttpError('"instanceIndex" must be 1 or 2 when given.', 400)
+}
+
+function parseTimesheetReference(
+  body: Record<string, unknown>
+): TimesheetReference {
+  if (
+    !isInstanceIndex(body.instanceIndex) ||
+    !isPositiveInteger(body.timesheetId)
+  ) {
+    throw new HttpError('"instanceIndex" and "timesheetId" are required.', 400)
+  }
+  return { instanceIndex: body.instanceIndex, timesheetId: body.timesheetId }
+}
+
+function parseHistoryQuery(body: Record<string, unknown>): HistoryQuery {
+  const { dateFrom, dateTo } = body
+  if (!isIsoDate(dateFrom) || !isIsoDate(dateTo)) {
+    throw new HttpError(
+      '"dateFrom" and "dateTo" must be dates (YYYY-MM-DD).',
+      400
+    )
+  }
+  const days =
+    (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) /
+      MS_PER_DAY +
+    1
+  if (days < 1 || days > MAX_HISTORY_DAYS) {
+    throw new HttpError(
+      `The period must run forward and last at most ${MAX_HISTORY_DAYS} days.`,
+      400
+    )
+  }
+  return {
+    dateFrom,
+    dateTo,
+    instanceIndex: readOptionalInstance(body.instanceIndex),
+  }
+}
+
 function parseRequest(body: unknown): GatewayRequest {
   if (!isRecord(body)) {
     throw new HttpError("Request body must be a JSON object.", 400)
@@ -214,10 +386,93 @@ function parseRequest(body: unknown): GatewayRequest {
     return { action: "FIND_TIMESHEETS", lookups }
   }
 
+  if (body.action === "GET_MY_TASKS") {
+    return {
+      action: "GET_MY_TASKS",
+      instanceIndex: readOptionalInstance(body.instanceIndex),
+    }
+  }
+
+  if (body.action === "GET_TIMESHEET_HISTORY") {
+    return { action: "GET_TIMESHEET_HISTORY", ...parseHistoryQuery(body) }
+  }
+
+  if (body.action === "UPDATE_TIMESHEET") {
+    const reference = parseTimesheetReference(body)
+    if (!isValidHours(body.hours)) {
+      throw new HttpError('"hours" must be between 0 and 24.', 400)
+    }
+    if (!isNonEmptyString(body.description, MAX_DESCRIPTION_LENGTH)) {
+      throw new HttpError(
+        `"description" must be a non-empty text of at most ${MAX_DESCRIPTION_LENGTH} characters.`,
+        400
+      )
+    }
+    return {
+      action: "UPDATE_TIMESHEET",
+      ...reference,
+      hours: body.hours,
+      description: body.description.trim(),
+    }
+  }
+
+  if (body.action === "DELETE_TIMESHEET") {
+    return { action: "DELETE_TIMESHEET", ...parseTimesheetReference(body) }
+  }
+
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS" or "GET_TASK".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET" or "DELETE_TIMESHEET".',
     400
   )
+}
+
+/* ------------------------------------------------------------------ */
+/* Model fields, cached per database                                   */
+/* ------------------------------------------------------------------ */
+
+const FIELDS_CACHE_TTL_MS = 10 * 60_000
+/** Survives between requests while the function instance stays warm. */
+const fieldsCache = new Map<
+  string,
+  { fields: Set<string>; expiresAt: number }
+>()
+
+/**
+ * The fields a model has on the session's database. Field lists differ
+ * between Odoo versions and installed apps, and asking search_read for a
+ * missing field fails, so callers check here first.
+ */
+async function getModelFields(
+  session: OdooSession,
+  model: string
+): Promise<Set<string>> {
+  const { url, db } = session.connection
+  const key = `${url}|${db}|${model}`
+  const cached = fieldsCache.get(key)
+  if (cached !== undefined && cached.expiresAt > Date.now()) {
+    return cached.fields
+  }
+  const description = await executeKw(session, model, "fields_get", [], {
+    attributes: ["type"],
+  })
+  if (!isRecord(description)) {
+    throw new HttpError(
+      `${session.connection.label} didn't describe the ${model} fields.`,
+      502
+    )
+  }
+  const fields = new Set(Object.keys(description))
+  fieldsCache.set(key, { fields, expiresAt: Date.now() + FIELDS_CACHE_TTL_MS })
+  return fields
+}
+
+/** The timesheet fields to read, with "validated" when the instance has it. */
+async function timesheetFields(
+  session: OdooSession,
+  base: readonly string[]
+): Promise<string[]> {
+  const fields = await getModelFields(session, "account.analytic.line")
+  return fields.has("validated") ? [...base, "validated"] : [...base]
 }
 
 /* ------------------------------------------------------------------ */
@@ -425,6 +680,7 @@ function readLoggedTimesheet(
     timesheetId: record.id,
     hours: record.unit_amount,
     description: typeof record.name === "string" ? record.name : "",
+    locked: record.validated === true,
   }
 }
 
@@ -458,7 +714,12 @@ async function findTimesheets(
         ],
       ],
       {
-        fields: ["task_id", "date", "unit_amount", "name"],
+        fields: await timesheetFields(session, [
+          "task_id",
+          "date",
+          "unit_amount",
+          "name",
+        ]),
         limit: TIMESHEET_LOOKUP_LIMIT,
       }
     )
@@ -506,6 +767,508 @@ async function getTask(
 }
 
 /* ------------------------------------------------------------------ */
+/* Shared helpers for the multi-instance read actions                  */
+/* ------------------------------------------------------------------ */
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** The requested instance, or every configured one in index order. */
+function selectInstances(
+  instances: OdooInstanceSettings[],
+  instanceIndex: InstanceIndex | null
+): InstanceIndex[] {
+  const configured = INSTANCE_INDEXES.filter((index) =>
+    instances.some((instance) => instance.index === index)
+  )
+  if (instanceIndex === null) {
+    return configured
+  }
+  if (!configured.includes(instanceIndex)) {
+    throw new HttpError(
+      `Odoo instance ${instanceIndex} is not configured.`,
+      400
+    )
+  }
+  return [instanceIndex]
+}
+
+/**
+ * Runs `read` on each instance in parallel. Odoo and network errors become a
+ * per-instance error; unexpected errors still fail the whole request.
+ */
+function readEachInstance<T>(
+  instances: OdooInstanceSettings[],
+  indexes: InstanceIndex[],
+  read: (session: OdooSession, index: InstanceIndex) => Promise<T>
+): Promise<InstanceResult<T>[]> {
+  const getSession = createSessionPool(instances)
+  return Promise.all(
+    indexes.map(async (index): Promise<InstanceResult<T>> => {
+      try {
+        const data = await read(await getSession(index), index)
+        return { instanceIndex: index, ok: true, ...data }
+      } catch (error) {
+        if (error instanceof HttpError) {
+          return { instanceIndex: index, ok: false, error: errorMessage(error) }
+        }
+        throw error
+      }
+    })
+  )
+}
+
+function readRecords(
+  value: unknown,
+  session: OdooSession,
+  what: string
+): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new HttpError(
+      `${session.connection.label} returned an invalid ${what} list.`,
+      502
+    )
+  }
+  return value
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+/** Odoo dates and datetimes ("2026-10-13" or "2026-10-13 08:00:00") as YYYY-MM-DD. */
+function readDate(value: unknown): string | null {
+  return typeof value === "string" && ISO_DATE.test(value.slice(0, 10))
+    ? value.slice(0, 10)
+    : null
+}
+
+/** Odoo datetimes are UTC "YYYY-MM-DD HH:MM:SS"; dates stay "YYYY-MM-DD". */
+function readDeadline(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/.exec(value)
+  if (match === null) {
+    return null
+  }
+  return match[2] === undefined ? match[1] : `${match[1]}T${match[2]}Z`
+}
+
+/* ------------------------------------------------------------------ */
+/* GET_MY_TASKS                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * project.task fields differ between Odoo versions:
+ * - user_id (single assignee) was replaced by user_ids in Odoo 15;
+ * - kanban_state was replaced by state in Odoo 17;
+ * - planned_hours was renamed allocated_hours in Odoo 17;
+ * - effective_hours only exists when Timesheets (hr_timesheet) is installed.
+ * Asking search_read for a missing field fails, so the fields are detected
+ * first and only the existing ones are requested.
+ */
+interface TaskFieldSupport {
+  assigneeDomain: unknown[]
+  fields: string[]
+  plannedField: "allocated_hours" | "planned_hours" | null
+  statusField: "kanban_state" | "state" | null
+  hasEffectiveHours: boolean
+}
+
+const BASE_TASK_FIELDS = [
+  "id",
+  "name",
+  "project_id",
+  "stage_id",
+  "priority",
+  "date_deadline",
+]
+
+async function detectTaskFields(
+  session: OdooSession
+): Promise<TaskFieldSupport> {
+  const available = await getModelFields(session, "project.task")
+  const has = (field: string): boolean => available.has(field)
+  const { uid } = session
+
+  let assigneeDomain: unknown[]
+  if (has("user_id") && has("user_ids")) {
+    assigneeDomain = [
+      "&",
+      ["active", "=", true],
+      "|",
+      ["user_id", "=", uid],
+      ["user_ids", "in", [uid]],
+    ]
+  } else if (has("user_ids")) {
+    assigneeDomain = [
+      ["active", "=", true],
+      ["user_ids", "in", [uid]],
+    ]
+  } else if (has("user_id")) {
+    assigneeDomain = [
+      ["active", "=", true],
+      ["user_id", "=", uid],
+    ]
+  } else {
+    throw new HttpError(
+      `${session.connection.label} has no task assignee field.`,
+      502
+    )
+  }
+
+  const plannedField = has("allocated_hours")
+    ? "allocated_hours"
+    : has("planned_hours")
+      ? "planned_hours"
+      : null
+  const statusField = has("kanban_state")
+    ? "kanban_state"
+    : has("state")
+      ? "state"
+      : null
+  const hasEffectiveHours = has("effective_hours")
+
+  const fields = BASE_TASK_FIELDS.filter(has)
+  if (plannedField !== null) fields.push(plannedField)
+  if (statusField !== null) fields.push(statusField)
+  if (hasEffectiveHours) fields.push("effective_hours")
+
+  return {
+    assigneeDomain,
+    fields,
+    plannedField,
+    statusField,
+    hasEffectiveHours,
+  }
+}
+
+const KANBAN_STATE_STATUSES: Readonly<Record<string, KanbanTaskStatus>> = {
+  normal: "in_progress",
+  done: "approved",
+  blocked: "blocked",
+}
+
+const STATE_STATUSES: Readonly<Record<string, KanbanTaskStatus>> = {
+  "01_in_progress": "in_progress",
+  "02_changes_requested": "changes_requested",
+  "03_approved": "approved",
+  "04_waiting_normal": "waiting",
+  "1_done": "done",
+  "1_canceled": "canceled",
+}
+
+function readTaskStatus(
+  value: unknown,
+  field: TaskFieldSupport["statusField"]
+): KanbanTaskStatus | null {
+  if (typeof value !== "string" || field === null) {
+    return null
+  }
+  const statuses =
+    field === "kanban_state" ? KANBAN_STATE_STATUSES : STATE_STATUSES
+  return statuses[value] ?? null
+}
+
+function readKanbanTask(
+  record: unknown,
+  instanceIndex: InstanceIndex,
+  support: TaskFieldSupport
+): KanbanTask | null {
+  if (
+    !isRecord(record) ||
+    !isPositiveInteger(record.id) ||
+    typeof record.name !== "string"
+  ) {
+    return null
+  }
+  const project = readMany2one(record.project_id)
+  const stage = readMany2one(record.stage_id)
+  const priority = Number(record.priority)
+  const planned =
+    support.plannedField === null
+      ? null
+      : readNumber(record[support.plannedField])
+
+  return {
+    instanceIndex,
+    taskId: record.id,
+    name: record.name,
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    stageId: stage?.id ?? null,
+    stageName: stage?.name ?? null,
+    priority: Number.isInteger(priority) && priority > 0 ? priority : 0,
+    deadline: readDeadline(record.date_deadline),
+    status: readTaskStatus(
+      support.statusField === null ? undefined : record[support.statusField],
+      support.statusField
+    ),
+    plannedHours: planned !== null && planned > 0 ? planned : null,
+    effectiveHours: support.hasEffectiveHours
+      ? (readNumber(record.effective_hours) ?? 0)
+      : null,
+  }
+}
+
+function readKanbanStage(
+  record: unknown,
+  instanceIndex: InstanceIndex
+): KanbanStage | null {
+  if (
+    !isRecord(record) ||
+    !isPositiveInteger(record.id) ||
+    typeof record.name !== "string"
+  ) {
+    return null
+  }
+  return {
+    instanceIndex,
+    stageId: record.id,
+    name: record.name,
+    sequence: readNumber(record.sequence) ?? 0,
+    folded: record.fold === true,
+  }
+}
+
+/** The stages of the tasks' projects, plus any stage a task sits in. */
+async function readStages(
+  session: OdooSession,
+  instanceIndex: InstanceIndex,
+  tasks: KanbanTask[]
+): Promise<KanbanStage[]> {
+  const projectIds = [...new Set(tasks.flatMap((task) => task.projectId ?? []))]
+  const stageIds = [...new Set(tasks.flatMap((task) => task.stageId ?? []))]
+  if (projectIds.length === 0 && stageIds.length === 0) {
+    return []
+  }
+
+  const records = await executeKw(
+    session,
+    "project.task.type",
+    "search_read",
+    [["|", ["id", "in", stageIds], ["project_ids", "in", projectIds]]],
+    {
+      fields: ["id", "name", "sequence", "fold"],
+      order: "sequence asc, id asc",
+    }
+  )
+  return readRecords(records, session, "stage").flatMap(
+    (record) => readKanbanStage(record, instanceIndex) ?? []
+  )
+}
+
+async function readMyTasks(
+  session: OdooSession,
+  instanceIndex: InstanceIndex
+): Promise<{ tasks: KanbanTask[]; stages: KanbanStage[]; truncated: boolean }> {
+  const support = await detectTaskFields(session)
+  const records = await executeKw(
+    session,
+    "project.task",
+    "search_read",
+    [support.assigneeDomain],
+    {
+      fields: support.fields,
+      limit: MY_TASKS_LIMIT,
+      order: "priority desc, id desc",
+    }
+  )
+  const rawTasks = readRecords(records, session, "task")
+  const tasks = rawTasks.flatMap(
+    (record) => readKanbanTask(record, instanceIndex, support) ?? []
+  )
+  const stages = await readStages(session, instanceIndex, tasks)
+  return { tasks, stages, truncated: rawTasks.length >= MY_TASKS_LIMIT }
+}
+
+function getMyTasks(
+  instances: OdooInstanceSettings[],
+  instanceIndex: InstanceIndex | null
+): Promise<MyTasksResult[]> {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    readMyTasks
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* GET_TIMESHEET_HISTORY                                               */
+/* ------------------------------------------------------------------ */
+
+const HISTORY_FIELDS = [
+  "id",
+  "name",
+  "unit_amount",
+  "date",
+  "project_id",
+  "task_id",
+]
+
+function readHistoryEntry(
+  record: unknown,
+  instanceIndex: InstanceIndex
+): TimesheetHistoryEntry | null {
+  if (!isRecord(record) || !isPositiveInteger(record.id)) {
+    return null
+  }
+  const date = readDate(record.date)
+  const hours = readNumber(record.unit_amount)
+  if (date === null || hours === null) {
+    return null
+  }
+  const project = readMany2one(record.project_id)
+  const task = readMany2one(record.task_id)
+  return {
+    instanceIndex,
+    timesheetId: record.id,
+    date,
+    description: typeof record.name === "string" ? record.name : "",
+    hours,
+    projectId: project?.id ?? null,
+    projectName: project?.name ?? null,
+    taskId: task?.id ?? null,
+    taskName: task?.name ?? null,
+    locked: record.validated === true,
+  }
+}
+
+function getTimesheetHistory(
+  instances: OdooInstanceSettings[],
+  { dateFrom, dateTo, instanceIndex }: HistoryQuery
+): Promise<TimesheetHistoryResult[]> {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      // project_id set: timesheets only, not other analytic lines.
+      const records = await executeKw(
+        session,
+        "account.analytic.line",
+        "search_read",
+        [
+          [
+            ["user_id", "=", session.uid],
+            ["project_id", "!=", false],
+            ["date", ">=", dateFrom],
+            ["date", "<=", dateTo],
+          ],
+        ],
+        {
+          fields: await timesheetFields(session, HISTORY_FIELDS),
+          limit: HISTORY_LIMIT,
+          order: "date desc, id desc",
+        }
+      )
+      const rawEntries = readRecords(records, session, "timesheet")
+      return {
+        entries: rawEntries.flatMap(
+          (record) => readHistoryEntry(record, index) ?? []
+        ),
+        truncated: rawEntries.length >= HISTORY_LIMIT,
+      }
+    }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* UPDATE_TIMESHEET / DELETE_TIMESHEET                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads a timesheet only if it belongs to the signed-in user, so the gateway
+ * never edits a colleague's line, even with a manager's access rights.
+ */
+async function readOwnTimesheet(
+  session: OdooSession,
+  instanceIndex: InstanceIndex,
+  timesheetId: number
+): Promise<TimesheetHistoryEntry> {
+  const records = await executeKw(
+    session,
+    "account.analytic.line",
+    "search_read",
+    [
+      [
+        ["id", "=", timesheetId],
+        ["user_id", "=", session.uid],
+      ],
+    ],
+    { fields: await timesheetFields(session, HISTORY_FIELDS), limit: 1 }
+  )
+  const entry = readHistoryEntry(
+    readRecords(records, session, "timesheet")[0],
+    instanceIndex
+  )
+  if (entry === null) {
+    throw new HttpError(
+      `Timesheet ${timesheetId} doesn't exist in ${session.connection.label}, or isn't yours.`,
+      404
+    )
+  }
+  return entry
+}
+
+/** A validated line can't change: say so before Odoo refuses with a vaguer message. */
+function requireUnlocked(entry: TimesheetHistoryEntry): void {
+  if (entry.locked) {
+    throw new HttpError(
+      "This timesheet is validated in Odoo and can't be changed anymore.",
+      409
+    )
+  }
+}
+
+/** Odoo refusals (validated timesheet, locked period...) are conflicts, not gateway failures. */
+async function asConflict<T>(operation: Promise<T>): Promise<T> {
+  try {
+    return await operation
+  } catch (error) {
+    if (error instanceof OdooRpcError) {
+      throw new HttpError(error.message, 409)
+    }
+    throw error
+  }
+}
+
+async function updateTimesheet(
+  instances: OdooInstanceSettings[],
+  { instanceIndex, timesheetId, hours, description }: TimesheetUpdate
+): Promise<TimesheetHistoryEntry> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  requireUnlocked(await readOwnTimesheet(session, instanceIndex, timesheetId))
+  const written = await asConflict(
+    executeKw(session, "account.analytic.line", "write", [
+      [timesheetId],
+      { unit_amount: hours, name: description },
+    ])
+  )
+  if (written !== true) {
+    throw new HttpError("Odoo didn't confirm the update.", 502)
+  }
+  // Read back what Odoo stored (rounding, onchange side effects).
+  return readOwnTimesheet(session, instanceIndex, timesheetId)
+}
+
+async function deleteTimesheet(
+  instances: OdooInstanceSettings[],
+  { instanceIndex, timesheetId }: TimesheetReference
+): Promise<TimesheetReference> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  requireUnlocked(await readOwnTimesheet(session, instanceIndex, timesheetId))
+  const deleted = await asConflict(
+    executeKw(session, "account.analytic.line", "unlink", [[timesheetId]])
+  )
+  if (deleted !== true) {
+    throw new HttpError("Odoo didn't confirm the deletion.", 502)
+  }
+  return { instanceIndex, timesheetId }
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP handler                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -528,6 +1291,18 @@ serveJson("odoo-gateway", {
         }
       case "GET_TASK":
         return { task: await getTask(instances, gatewayRequest) }
+      case "GET_MY_TASKS":
+        return {
+          instances: await getMyTasks(instances, gatewayRequest.instanceIndex),
+        }
+      case "GET_TIMESHEET_HISTORY":
+        return {
+          instances: await getTimesheetHistory(instances, gatewayRequest),
+        }
+      case "UPDATE_TIMESHEET":
+        return { timesheet: await updateTimesheet(instances, gatewayRequest) }
+      case "DELETE_TIMESHEET":
+        return { deleted: await deleteTimesheet(instances, gatewayRequest) }
     }
   },
 })

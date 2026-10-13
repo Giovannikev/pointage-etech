@@ -7,7 +7,8 @@ import type {
 export const MIN_HOURS = 0.25
 export const MAX_HOURS = 24
 export const HOURS_STEP = 0.25
-const WORKDAY_HOURS = 8
+/** Hours expected on a working day. */
+export const WORKDAY_HOURS = 8
 
 export type VerifiableEntry = TimesheetEntry & {
   commit: ParsedCommit & { taskRef: string }

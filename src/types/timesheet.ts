@@ -9,6 +9,8 @@ export interface RawCommit {
   message: string
   /** Local ISO date (YYYY-MM-DD) the commit was authored on. */
   date: string
+  /** ISO timestamp of the commit; null when unknown (pasted commits). */
+  authoredAt: string | null
 }
 
 /** Days whose commits are imported, both included. */
@@ -68,14 +70,20 @@ export interface TimesheetEntry {
   /** True once the user typed the description: it is no longer regenerated. */
   isDescriptionEdited: boolean
   hours: number
+  /** True once the user typed the hours: estimates leave them alone. */
+  isHoursEdited: boolean
   /** ISO date (YYYY-MM-DD) the timesheet is logged on. */
   date: string
+  /** ISO timestamp of the commit; null for pasted commits. */
+  authoredAt: string | null
   status: TimesheetStatus
   task: OdooTaskMatch | null
   activity: EntryActivity
   /** Why the line has its status, for the missing, logged and error statuses. */
   statusDetail: StatusDetail | null
   odooTimesheetId: number | null
+  /** The Odoo line is validated: it can't be edited or deleted anymore. */
+  odooLocked: boolean
   /** Hours the user had already logged in Odoo on this task and date. */
   loggedHours: number
 }
@@ -138,6 +146,8 @@ export interface LoggedTimesheet extends TimesheetLookup {
   timesheetId: number
   hours: number
   description: string
+  /** Validated in Odoo (Timesheets app): it can't be changed anymore. */
+  locked: boolean
 }
 
 export interface GetTaskRequest {
@@ -156,11 +166,149 @@ export interface TaskDetails {
   stageName: string | null
 }
 
+/* ---- Kanban ------------------------------------------------------ */
+
+/** Task state, normalized across Odoo versions (kanban_state up to 16, state from 17). */
+export type KanbanTaskStatus =
+  | "in_progress"
+  | "changes_requested"
+  | "approved"
+  | "done"
+  | "canceled"
+  | "waiting"
+  | "blocked"
+
+/** A task assigned to the signed-in user, as shown on the Kanban board. */
+export interface KanbanTask {
+  instanceIndex: OdooInstanceIndex
+  taskId: number
+  name: string
+  projectId: number | null
+  projectName: string | null
+  stageId: number | null
+  stageName: string | null
+  /** 0 is normal; 1 and more are starred. */
+  priority: number
+  /**
+   * "YYYY-MM-DD" (date field, Odoo 16 and older) or an ISO UTC timestamp
+   * (datetime field, Odoo 17+). Read it with toLocalIsoDate().
+   */
+  deadline: string | null
+  status: KanbanTaskStatus | null
+  /** null when the instance has no planned hours field or none are set. */
+  plannedHours: number | null
+  /** null when timesheets aren't installed on the instance. */
+  effectiveHours: number | null
+}
+
+/** A project.task.type record of one instance. */
+export interface KanbanStage {
+  instanceIndex: OdooInstanceIndex
+  stageId: number
+  name: string
+  sequence: number
+  folded: boolean
+}
+
+export interface GetMyTasksRequest {
+  action: "GET_MY_TASKS"
+  /** Omitted: every configured instance. */
+  instanceIndex?: OdooInstanceIndex
+}
+
+/** One result per instance, so a failing instance doesn't hide the other one. */
+export type InstanceResult<T> =
+  | ({ instanceIndex: OdooInstanceIndex; ok: true } & T)
+  | { instanceIndex: OdooInstanceIndex; ok: false; error: string }
+
+export type MyTasksInstanceResult = InstanceResult<{
+  tasks: KanbanTask[]
+  stages: KanbanStage[]
+  /** True when the task limit was reached and older tasks were left out. */
+  truncated: boolean
+}>
+
+export interface GetMyTasksResponse {
+  instances: MyTasksInstanceResult[]
+}
+
+/* ---- History ----------------------------------------------------- */
+
+/** A timesheet line the signed-in user logged in Odoo. */
+export interface TimesheetHistoryEntry {
+  instanceIndex: OdooInstanceIndex
+  timesheetId: number
+  /** YYYY-MM-DD */
+  date: string
+  description: string
+  hours: number
+  projectId: number | null
+  projectName: string | null
+  taskId: number | null
+  taskName: string | null
+  /** Validated in Odoo (Timesheets app): it can't be changed anymore. */
+  locked: boolean
+}
+
+export interface GetTimesheetHistoryRequest {
+  action: "GET_TIMESHEET_HISTORY"
+  /** YYYY-MM-DD, included */
+  dateFrom: string
+  /** YYYY-MM-DD, included */
+  dateTo: string
+  /** Omitted: every configured instance. */
+  instanceIndex?: OdooInstanceIndex
+}
+
+export type TimesheetHistoryInstanceResult = InstanceResult<{
+  entries: TimesheetHistoryEntry[]
+  truncated: boolean
+}>
+
+export interface GetTimesheetHistoryResponse {
+  instances: TimesheetHistoryInstanceResult[]
+}
+
+/* ---- Update / delete --------------------------------------------- */
+
+/** Identifies an existing timesheet line in one of the user's instances. */
+export interface TimesheetReference {
+  instanceIndex: OdooInstanceIndex
+  timesheetId: number
+}
+
+export interface TimesheetChanges {
+  hours: number
+  description: string
+}
+
+export interface UpdateTimesheetRequest
+  extends TimesheetReference, TimesheetChanges {
+  action: "UPDATE_TIMESHEET"
+}
+
+export interface UpdateTimesheetResponse {
+  /** The line as stored by Odoo after the update. */
+  timesheet: TimesheetHistoryEntry
+}
+
+export interface DeleteTimesheetRequest extends TimesheetReference {
+  action: "DELETE_TIMESHEET"
+}
+
+export interface DeleteTimesheetResponse {
+  deleted: TimesheetReference
+}
+
 export type GatewayRequest =
   | SearchTaskRequest
   | SubmitTimesheetRequest
   | FindTimesheetsRequest
   | GetTaskRequest
+  | GetMyTasksRequest
+  | GetTimesheetHistoryRequest
+  | UpdateTimesheetRequest
+  | DeleteTimesheetRequest
 
 /* ------------------------------------------------------------------ */
 /* github-commits Edge Function contract                               */

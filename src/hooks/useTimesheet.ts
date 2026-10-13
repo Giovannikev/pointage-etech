@@ -2,9 +2,11 @@ import { useCallback, useMemo, useReducer, useState } from "react"
 
 import { fetchCommits } from "@/services/commitSourceService"
 import {
+  deleteTimesheet,
   findLoggedTimesheets,
   searchTasks,
   submitTimesheets,
+  updateTimesheet,
 } from "@/services/odooService"
 import type {
   CommitPeriod,
@@ -14,12 +16,14 @@ import type {
   SubmissionResult,
   SubmissionSummary,
   TaskSearchResult,
+  TimesheetChanges,
   TimesheetEntry,
   TimesheetLookup,
   TimesheetSubmission,
   VerificationSummary,
 } from "@/types/timesheet"
 import { parseCommitLog, parseCommitMessage } from "@/utils/commitParser"
+import { estimateHours, type EstimateLine } from "@/utils/hoursEstimate"
 import {
   NOT_LOGGED,
   reconcileWithOdoo,
@@ -30,6 +34,7 @@ import { describeCommit } from "@/utils/timesheetDescription"
 import {
   canVerify,
   isEditable,
+  isInOdoo,
   isSubmittable,
   roundHours,
   type SubmittableEntry,
@@ -42,6 +47,7 @@ type FailedSubmission = Extract<SubmissionResult, { success: false }>
 interface DatedCommit {
   commit: ParsedCommit
   date: string
+  authoredAt: string | null
 }
 
 interface TaskMatch {
@@ -72,6 +78,15 @@ type TimesheetAction =
   | { type: "submissionStarted"; ids: string[] }
   | { type: "submissionResolved"; ids: string[]; results: SubmissionResult[] }
   | { type: "submissionFailed"; ids: string[]; message: string }
+  | {
+      type: "loggedEntryUpdated"
+      id: string
+      hours: number
+      description: string
+    }
+  | { type: "loggedEntryDeleted"; id: string }
+  /** Spreads the workday over the lines of these days (all days when null). */
+  | { type: "hoursEstimated"; dates: string[] | null }
 
 function updateWhere(
   entries: TimesheetEntry[],
@@ -85,7 +100,10 @@ function updateWhere(
 function applyEdit(
   entry: TimesheetEntry,
   patch: Partial<
-    Pick<TimesheetEntry, "description" | "isDescriptionEdited" | "hours">
+    Pick<
+      TimesheetEntry,
+      "description" | "isDescriptionEdited" | "hours" | "isHoursEdited"
+    >
   >
 ): TimesheetEntry {
   if (!isEditable(entry)) {
@@ -123,6 +141,7 @@ function resolveVerification(
       statusDetail: { reason: "alreadyLogged" },
       hours: duplicate.hours,
       odooTimesheetId: duplicate.timesheetId,
+      odooLocked: duplicate.locked,
       loggedHours,
     }
   }
@@ -158,6 +177,78 @@ function resolveSubmission(
   }
 }
 
+/** Mirrors an edit made in Odoo on a line that is already there. */
+function applyOdooUpdate(
+  entry: TimesheetEntry,
+  hours: number,
+  description: string
+): TimesheetEntry {
+  // loggedHours counts the duplicate itself for lines found already logged.
+  const loggedHours =
+    entry.status === "logged"
+      ? roundHours(Math.max(0, entry.loggedHours - entry.hours + hours))
+      : entry.loggedHours
+  return {
+    ...entry,
+    hours,
+    description,
+    isDescriptionEdited: true,
+    loggedHours,
+  }
+}
+
+/** The line left Odoo: it is back to a found line, ready to submit again. */
+function applyOdooDeletion(entry: TimesheetEntry): TimesheetEntry {
+  const loggedHours =
+    entry.status === "logged"
+      ? roundHours(Math.max(0, entry.loggedHours - entry.hours))
+      : entry.loggedHours
+  return {
+    ...entry,
+    status: "found",
+    statusDetail: null,
+    odooTimesheetId: null,
+    odooLocked: false,
+    loggedHours,
+  }
+}
+
+/**
+ * How a line takes part in the estimate: fixed (in Odoo, or hours typed by
+ * the user), flexible (a line to submit), or left out (no task: it won't be
+ * submitted, so it shouldn't take a share of the day).
+ */
+function toEstimateLine(entry: TimesheetEntry): EstimateLine | null {
+  if (entry.task === null) {
+    return null
+  }
+  const isFixed = isInOdoo(entry) || entry.isHoursEdited || !isEditable(entry)
+  return {
+    id: entry.id,
+    date: entry.date,
+    authoredAt: entry.authoredAt,
+    hours: entry.hours,
+    isFixed,
+  }
+}
+
+function applyEstimate(
+  entries: TimesheetEntry[],
+  dates: string[] | null
+): TimesheetEntry[] {
+  const wanted = dates === null ? null : new Set(dates)
+  const lines = entries
+    .filter((entry) => wanted === null || wanted.has(entry.date))
+    .flatMap((entry) => toEstimateLine(entry) ?? [])
+  const estimates = estimateHours(lines)
+  return entries.map((entry) => {
+    const hours = estimates.get(entry.id)
+    return hours === undefined || hours === entry.hours
+      ? entry
+      : { ...entry, hours }
+  })
+}
+
 function timesheetReducer(
   entries: TimesheetEntry[],
   action: TimesheetAction
@@ -188,7 +279,7 @@ function timesheetReducer(
 
     case "hoursChanged":
       return updateWhere(entries, new Set([action.id]), (entry) =>
-        applyEdit(entry, { hours: action.hours })
+        applyEdit(entry, { hours: action.hours, isHoursEdited: true })
       )
 
     case "verificationStarted":
@@ -243,10 +334,29 @@ function timesheetReducer(
         status: "error",
         statusDetail: { reason: "serverError", message: action.message },
       }))
+
+    case "loggedEntryUpdated":
+      return updateWhere(entries, new Set([action.id]), (entry) =>
+        isInOdoo(entry)
+          ? applyOdooUpdate(entry, action.hours, action.description)
+          : entry
+      )
+
+    case "loggedEntryDeleted":
+      return updateWhere(entries, new Set([action.id]), (entry) =>
+        isInOdoo(entry) ? applyOdooDeletion(entry) : entry
+      )
+
+    case "hoursEstimated":
+      return applyEstimate(entries, action.dates)
   }
 }
 
-function createEntry({ commit, date }: DatedCommit): TimesheetEntry {
+function createEntry({
+  commit,
+  date,
+  authoredAt,
+}: DatedCommit): TimesheetEntry {
   const hasTaskRef = commit.taskRef !== null
   return {
     id: crypto.randomUUID(),
@@ -254,12 +364,15 @@ function createEntry({ commit, date }: DatedCommit): TimesheetEntry {
     description: describeCommit(commit, null),
     isDescriptionEdited: false,
     hours: DEFAULT_HOURS,
+    isHoursEdited: false,
     date,
+    authoredAt,
     status: hasTaskRef ? "pending" : "missing",
     task: null,
     activity: "idle",
     statusDetail: hasTaskRef ? null : { reason: "noTaskReference" },
     odooTimesheetId: null,
+    odooLocked: false,
     loggedHours: 0,
   }
 }
@@ -341,6 +454,14 @@ export interface UseTimesheetResult {
   removeEntry: (id: string) => void
   submitEntry: (id: string) => Promise<SubmissionSummary>
   submitAll: () => Promise<SubmissionSummary>
+  /** Edits a line already in Odoo; rejects with Odoo's message. */
+  updateInOdoo: (id: string, changes: TimesheetChanges) => Promise<void>
+  /** Deletes a line from Odoo; it stays in the list, ready to submit again. */
+  deleteFromOdoo: (id: string) => Promise<void>
+  /** Spreads the workday over the lines to submit, by commit time. */
+  estimateAllHours: () => void
+  /** Lines whose hours an estimate may change. */
+  estimableCount: number
 }
 
 export function useTimesheet(): UseTimesheetResult {
@@ -432,6 +553,14 @@ export function useTimesheet(): UseTimesheetResult {
       const newEntries = fresh.map(createEntry)
       dispatch({ type: "entriesAdded", entries: newEntries })
       const verification = await verify(newEntries)
+      // Once tasks and Odoo duplicates are known, spread the workday over
+      // the days that received new lines (the user's typed hours stay).
+      if (newEntries.length > 0) {
+        dispatch({
+          type: "hoursEstimated",
+          dates: [...new Set(newEntries.map((entry) => entry.date))],
+        })
+      }
 
       return {
         added: newEntries.length,
@@ -444,7 +573,13 @@ export function useTimesheet(): UseTimesheetResult {
 
   const importFromText = useCallback(
     (raw: string, date: string): Promise<ImportSummary> =>
-      addAndVerify(parseCommitLog(raw).map((commit) => ({ commit, date }))),
+      addAndVerify(
+        parseCommitLog(raw).map((commit) => ({
+          commit,
+          date,
+          authoredAt: null,
+        }))
+      ),
     [addAndVerify]
   )
 
@@ -455,9 +590,9 @@ export function useTimesheet(): UseTimesheetResult {
       // The list now shows the fetched period. Lines already in it for these
       // days are kept with their edits; the fetched duplicates are skipped.
       dispatch({ type: "periodApplied", period })
-      const dated = rawCommits.flatMap(({ message, date }) => {
+      const dated = rawCommits.flatMap(({ message, date, authoredAt }) => {
         const commit = parseCommitMessage(message)
-        return commit === null ? [] : [{ commit, date }]
+        return commit === null ? [] : [{ commit, date, authoredAt }]
       })
       return await addAndVerify(dated)
     } finally {
@@ -522,6 +657,59 @@ export function useTimesheet(): UseTimesheetResult {
     dispatch({ type: "entryRemoved", id })
   }, [])
 
+  const findOdooLine = useCallback(
+    (id: string) => {
+      const entry = entries.find((candidate) => candidate.id === id)
+      if (
+        entry === undefined ||
+        !isInOdoo(entry) ||
+        entry.task === null ||
+        entry.odooTimesheetId === null
+      ) {
+        throw new Error("This line isn't in Odoo.")
+      }
+      return {
+        instanceIndex: entry.task.instanceIndex,
+        timesheetId: entry.odooTimesheetId,
+      }
+    },
+    [entries]
+  )
+
+  const updateInOdoo = useCallback(
+    async (id: string, changes: TimesheetChanges): Promise<void> => {
+      const saved = await updateTimesheet(findOdooLine(id), changes)
+      dispatch({
+        type: "loggedEntryUpdated",
+        id,
+        hours: saved.hours,
+        description: saved.description,
+      })
+    },
+    [findOdooLine]
+  )
+
+  const deleteFromOdoo = useCallback(
+    async (id: string): Promise<void> => {
+      await deleteTimesheet(findOdooLine(id))
+      dispatch({ type: "loggedEntryDeleted", id })
+    },
+    [findOdooLine]
+  )
+
+  const estimateAllHours = useCallback((): void => {
+    dispatch({ type: "hoursEstimated", dates: null })
+  }, [])
+
+  const estimableCount = useMemo(
+    () =>
+      entries.filter((entry) => {
+        const line = toEstimateLine(entry)
+        return line !== null && !line.isFixed
+      }).length,
+    [entries]
+  )
+
   const totalHours = useMemo(
     () => roundHours(entries.reduce((sum, entry) => sum + entry.hours, 0)),
     [entries]
@@ -550,5 +738,9 @@ export function useTimesheet(): UseTimesheetResult {
     removeEntry,
     submitEntry,
     submitAll,
+    updateInOdoo,
+    deleteFromOdoo,
+    estimateAllHours,
+    estimableCount,
   }
 }
