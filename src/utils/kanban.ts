@@ -1,8 +1,10 @@
 import type {
+  HelpdeskTicket,
   KanbanStage,
   KanbanTask,
   MyTasksInstanceResult,
   OdooInstanceIndex,
+  TicketsInstanceResult,
 } from "@/types/timesheet"
 import { toLocalIsoDate } from "@/utils/date"
 import { roundHours } from "@/utils/timesheetRules"
@@ -46,6 +48,62 @@ export function matchesTaskSearch(task: KanbanTask, query: string): boolean {
   return words.every((word) => haystack.includes(word))
 }
 
+/** Every word of the query must appear in the ticket's title, reference, id, team or project. */
+export function matchesTicketSearch(
+  ticket: HelpdeskTicket,
+  query: string
+): boolean {
+  const words = normalizeText(query).split(/\s+/).filter(Boolean)
+  if (words.length === 0) {
+    return true
+  }
+  const haystack = normalizeText(
+    [
+      ticket.name,
+      ticket.ref ?? "",
+      String(ticket.ticketId),
+      ticket.teamName ?? "",
+      ticket.projectName ?? "",
+    ].join(" ")
+  )
+  return words.every((word) => haystack.includes(word))
+}
+
+/** A card of the board: one of the user's tasks, or one of their helpdesk tickets. */
+export type BoardCard =
+  | { kind: "task"; task: KanbanTask }
+  | { kind: "ticket"; ticket: HelpdeskTicket }
+
+/** Unique across kinds and instances, for React keys. */
+export function cardKey(card: BoardCard): string {
+  return card.kind === "task"
+    ? `task:${card.task.instanceIndex}:${card.task.taskId}`
+    : `ticket:${card.ticket.instanceIndex}:${card.ticket.ticketId}`
+}
+
+function cardItem(card: BoardCard): KanbanTask | HelpdeskTicket {
+  return card.kind === "task" ? card.task : card.ticket
+}
+
+/** Hours already logged on the card, when known. */
+function cardHours(card: BoardCard): number | null {
+  return card.kind === "task"
+    ? card.task.effectiveHours
+    : card.ticket.hoursSpent
+}
+
+/** The user's open tickets of the selected instances. */
+export function listTickets(
+  results: TicketsInstanceResult[] | undefined,
+  instance: "all" | OdooInstanceIndex
+): HelpdeskTicket[] {
+  return (results ?? []).flatMap((result) =>
+    result.ok && (instance === "all" || result.instanceIndex === instance)
+      ? result.tickets
+      : []
+  )
+}
+
 export type BoardGrouping = "stage" | "project"
 
 export interface BoardColumn {
@@ -58,8 +116,8 @@ export interface BoardColumn {
   sequence: number
   /** Folded in Odoo (usually done or cancelled stages). */
   folded: boolean
-  tasks: KanbanTask[]
-  /** Hours already logged on the column's tasks, when known. */
+  cards: BoardCard[]
+  /** Hours already logged on the column's tasks and tickets, when known. */
   effectiveHours: number
 }
 
@@ -84,10 +142,12 @@ export const NO_PROJECT_KEY = "none"
  * Identifies a project across instances: the same id in two instances is two
  * different projects.
  */
-export function projectKey(task: KanbanTask): string {
-  return task.projectId === null
+export function projectKey(
+  item: Pick<KanbanTask | HelpdeskTicket, "instanceIndex" | "projectId">
+): string {
+  return item.projectId === null
     ? NO_PROJECT_KEY
-    : `${task.instanceIndex}:${task.projectId}`
+    : `${item.instanceIndex}:${item.projectId}`
 }
 
 function stageKey(instanceIndex: OdooInstanceIndex, stageId: number): string {
@@ -162,6 +222,7 @@ export interface ProjectOption {
   name: string | null
   /** null when the option gathers tasks of several instances (no project). */
   instanceIndex: OdooInstanceIndex | null
+  /** Tasks and tickets of the project on the board. */
   taskCount: number
 }
 
@@ -171,18 +232,23 @@ function compareNames(a: string | null, b: string | null): number {
   return a.localeCompare(b)
 }
 
-/** The projects of the tasks in scope, by name. */
+/** The projects of the tasks (and tickets) in scope, by name. */
 export function listProjects(
   results: MyTasksInstanceResult[],
-  scope: BoardScope
+  scope: BoardScope,
+  tickets: HelpdeskTicket[] = []
 ): ProjectOption[] {
   const options = new Map<string, ProjectOption>()
-  for (const task of scopeTasks(results, scope).tasks) {
-    const key = projectKey(task)
+  const items: (KanbanTask | HelpdeskTicket)[] = [
+    ...scopeTasks(results, scope).tasks,
+    ...scopeTickets(tickets, scope.instance),
+  ]
+  for (const item of items) {
+    const key = projectKey(item)
     const option = options.get(key) ?? {
       key,
-      name: task.projectName,
-      instanceIndex: task.projectId === null ? null : task.instanceIndex,
+      name: item.projectName,
+      instanceIndex: item.projectId === null ? null : item.instanceIndex,
       taskCount: 0,
     }
     options.set(key, { ...option, taskCount: option.taskCount + 1 })
@@ -190,19 +256,38 @@ export function listProjects(
   return [...options.values()].sort((a, b) => compareNames(a.name, b.name))
 }
 
+/** Tickets have no deadline. */
+function cardDeadline(card: BoardCard): string | null {
+  return card.kind === "task" && card.task.deadline !== null
+    ? toLocalIsoDate(card.task.deadline)
+    : null
+}
+
 /** Starred first, then by nearest deadline, then by name. */
-function compareTasks(a: KanbanTask, b: KanbanTask): number {
-  if (a.priority !== b.priority) {
-    return b.priority - a.priority
+function compareCards(a: BoardCard, b: BoardCard): number {
+  const itemA = cardItem(a)
+  const itemB = cardItem(b)
+  if (itemA.priority !== itemB.priority) {
+    return itemB.priority - itemA.priority
   }
-  const deadlineA = a.deadline === null ? null : toLocalIsoDate(a.deadline)
-  const deadlineB = b.deadline === null ? null : toLocalIsoDate(b.deadline)
+  const deadlineA = cardDeadline(a)
+  const deadlineB = cardDeadline(b)
   if (deadlineA !== deadlineB) {
     if (deadlineA === null) return 1
     if (deadlineB === null) return -1
     return deadlineA.localeCompare(deadlineB)
   }
-  return a.name.localeCompare(b.name)
+  return itemA.name.localeCompare(itemB.name)
+}
+
+/** Tickets are only read while open, so none of them is closed. */
+function scopeTickets(
+  tickets: HelpdeskTicket[],
+  instance: "all" | OdooInstanceIndex
+): HelpdeskTicket[] {
+  return tickets.filter(
+    (ticket) => instance === "all" || ticket.instanceIndex === instance
+  )
 }
 
 function compareColumns(a: BoardColumn, b: BoardColumn): number {
@@ -228,21 +313,24 @@ interface ColumnPlacement {
  * project), so there is one column per stage name, placed by its lowest
  * sequence. By project, there is one column per project, by name.
  */
-function placeTask(
-  task: KanbanTask,
+function placeCard(
+  card: BoardCard,
   stage: KanbanStage | undefined,
   groupBy: BoardGrouping
 ): ColumnPlacement {
+  const item = cardItem(card)
   if (groupBy === "project") {
     return {
-      key: projectKey(task),
-      name: task.projectName,
-      instanceIndex: task.projectId === null ? null : task.instanceIndex,
+      key: projectKey(item),
+      name: item.projectName,
+      instanceIndex: item.projectId === null ? null : item.instanceIndex,
       sequence: 0,
       folded: false,
     }
   }
-  const name = stage?.name ?? task.stageName
+  // A ticket's helpdesk stage joins the task column of the same name, if
+  // any; otherwise it gets a column of its own after the task stages.
+  const name = stage?.name ?? item.stageName
   return {
     key: name === null ? NO_STAGE_KEY : normalizeText(name),
     name,
@@ -252,20 +340,36 @@ function placeTask(
   }
 }
 
-/** Groups the tasks into columns. Only columns holding tasks are returned. */
+/**
+ * Groups the tasks, and the open tickets when given, into columns. Only
+ * columns holding cards are returned.
+ */
 export function buildBoard(
   results: MyTasksInstanceResult[],
-  { query, projects, groupBy, ...scope }: BoardFilters
+  { query, projects, groupBy, ...scope }: BoardFilters,
+  tickets: HelpdeskTicket[] = []
 ): BoardColumn[] {
   const { tasks, stages } = scopeTasks(results, scope)
+  const cards: BoardCard[] = [
+    ...tasks.map((task): BoardCard => ({ kind: "task", task })),
+    ...scopeTickets(tickets, scope.instance).map((ticket): BoardCard => ({
+      kind: "ticket",
+      ticket,
+    })),
+  ]
 
   // Built locally, then returned as fresh objects: nothing shared is mutated.
   const columns = new Map<string, BoardColumn>()
-  for (const task of tasks) {
-    if (projects.size > 0 && !projects.has(projectKey(task))) continue
-    if (!matchesTaskSearch(task, query)) continue
+  for (const card of cards) {
+    if (projects.size > 0 && !projects.has(projectKey(cardItem(card)))) continue
+    const matches =
+      card.kind === "task"
+        ? matchesTaskSearch(card.task, query)
+        : matchesTicketSearch(card.ticket, query)
+    if (!matches) continue
 
-    const placement = placeTask(task, stageOf(task, stages), groupBy)
+    const stage = card.kind === "task" ? stageOf(card.task, stages) : undefined
+    const placement = placeCard(card, stage, groupBy)
     let column = columns.get(placement.key)
     if (column === undefined) {
       column = {
@@ -275,7 +379,7 @@ export function buildBoard(
         instanceIndex: placement.instanceIndex,
         sequence: placement.sequence,
         folded: true,
-        tasks: [],
+        cards: [],
         effectiveHours: 0,
       }
       columns.set(placement.key, column)
@@ -283,14 +387,14 @@ export function buildBoard(
     column.sequence = Math.min(column.sequence, placement.sequence)
     // A stage column is folded only if every merged stage is folded in Odoo.
     column.folded = column.folded && placement.folded
-    column.tasks.push(task)
-    column.effectiveHours += task.effectiveHours ?? 0
+    column.cards.push(card)
+    column.effectiveHours += cardHours(card) ?? 0
   }
 
   return [...columns.values()]
     .map((column) => ({
       ...column,
-      tasks: column.tasks.sort(compareTasks),
+      cards: column.cards.sort(compareCards),
       effectiveHours: roundHours(column.effectiveHours),
     }))
     .sort(compareColumns)

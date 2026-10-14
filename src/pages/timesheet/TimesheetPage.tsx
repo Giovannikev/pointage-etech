@@ -237,6 +237,7 @@ export function TimesheetPage({
           onVerify={handleVerify}
           onSubmit={handleSubmit}
           onRemove={timesheet.removeEntry}
+          onAssignTask={timesheet.assignTask}
           onUpdateInOdoo={timesheet.updateInOdoo}
           onDeleteFromOdoo={timesheet.deleteFromOdoo}
         />

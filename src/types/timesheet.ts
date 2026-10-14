@@ -78,6 +78,11 @@ export interface TimesheetEntry {
   authoredAt: string | null
   status: TimesheetStatus
   task: OdooTaskMatch | null
+  /**
+   * True once the user picked the task by hand (instance, project, task):
+   * checking the line again keeps it instead of searching the reference.
+   */
+  isTaskManual: boolean
   activity: EntryActivity
   /** Why the line has its status, for the missing, logged and error statuses. */
   statusDetail: StatusDetail | null
@@ -361,6 +366,42 @@ export interface LogTicketTimeRequest {
   date: string
 }
 
+/* ---- Manual task picker ---------------------------------------- */
+
+/** A project of one instance that time can be logged in. */
+export interface OdooProject {
+  instanceIndex: OdooInstanceIndex
+  projectId: number
+  name: string
+  /** The project's customer, to tell same-name projects apart. */
+  partnerName: string | null
+}
+
+export interface ListProjectsRequest {
+  action: "LIST_PROJECTS"
+  instanceIndex: OdooInstanceIndex
+}
+
+export interface ListProjectsResponse {
+  projects: OdooProject[]
+  /** True when the project limit was reached. */
+  truncated: boolean
+}
+
+export interface ListProjectTasksRequest {
+  action: "LIST_PROJECT_TASKS"
+  instanceIndex: OdooInstanceIndex
+  projectId: number
+  /** Optional name or "#id" filter, 2 to 100 characters when given. */
+  query?: string
+}
+
+export interface ListProjectTasksResponse {
+  tasks: KanbanTask[]
+  /** True when the task limit was reached: a search narrows the list. */
+  truncated: boolean
+}
+
 export type GatewayRequest =
   | SearchTaskRequest
   | SubmitTimesheetRequest
@@ -373,6 +414,8 @@ export type GatewayRequest =
   | SearchTasksRequest
   | SearchTicketsRequest
   | LogTicketTimeRequest
+  | ListProjectsRequest
+  | ListProjectTasksRequest
 
 /* ------------------------------------------------------------------ */
 /* github-commits Edge Function contract                               */

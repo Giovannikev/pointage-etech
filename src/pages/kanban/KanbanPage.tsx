@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react"
 import {
   ArchiveIcon,
   Columns3Icon,
+  LifeBuoyIcon,
   RefreshCwIcon,
   SearchIcon,
   TriangleAlertIcon,
@@ -16,7 +17,7 @@ import {
   type QuickLogResult,
 } from "@/components/kanban/QuickLogDialog"
 import { SettingsGate } from "@/components/settings/SettingsGate"
-import { taskTarget, type LogTarget } from "@/components/timesheet/logTarget"
+import { type LogTarget } from "@/components/timesheet/logTarget"
 import {
   InstanceFilter,
   type InstanceFilterValue,
@@ -49,16 +50,23 @@ import { useFormatters } from "@/hooks/useFormatters"
 import { useTaskDetails } from "@/hooks/useTaskDetails"
 import { useSyncViewParams } from "@/hooks/useViewParams"
 import { cn } from "@/lib/utils"
-import { fetchMyTasks, peekMyTasks } from "@/services/odooService"
+import {
+  fetchMyTasks,
+  peekMyTasks,
+  peekTickets,
+  searchTickets,
+} from "@/services/odooService"
 import type {
   KanbanTask,
   MyTasksInstanceResult,
   OdooTaskMatch,
+  TicketsInstanceResult,
 } from "@/types/timesheet"
 import {
   buildBoard,
   countClosedTasks,
   listProjects,
+  listTickets,
   type BoardGrouping,
 } from "@/utils/kanban"
 import {
@@ -85,10 +93,21 @@ function readInitialFilters() {
       ? "project"
       : "stage") as BoardGrouping,
     showClosed: params.get("closed") === "1",
+    showTickets: params.get("tickets") !== "0",
   }
 }
 
 const MY_TASKS_QUERY_KEY = "myTasks"
+/** Same key as the Tasks page's "My open tickets": both share one read. */
+const MY_TICKETS_QUERY_KEY = "tickets:mine:"
+
+const fetchMyTickets = ({
+  force,
+}: {
+  force: boolean
+}): Promise<TicketsInstanceResult[]> => searchTickets("", true, { force })
+const peekMyTickets = (): TicketsInstanceResult[] | undefined =>
+  peekTickets("", true)
 
 function BoardSkeleton() {
   const { t } = useTranslation()
@@ -138,6 +157,7 @@ function KanbanWorkspace() {
   )
   const [groupBy, setGroupBy] = useState<BoardGrouping>(initial.groupBy)
   const [showClosed, setShowClosed] = useState(initial.showClosed)
+  const [showTickets, setShowTickets] = useState(initial.showTickets)
 
   useSyncViewParams("kanban", {
     instance: formatInstanceParam(instance),
@@ -145,6 +165,7 @@ function KanbanWorkspace() {
     projects: [...projects].sort().join(","),
     group: groupBy === "project" ? "project" : null,
     closed: showClosed ? "1" : null,
+    tickets: showTickets ? null : "0",
   })
   /** Columns whose folded state the user flipped, keyed by column key. */
   const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set())
@@ -160,25 +181,53 @@ function KanbanWorkspace() {
     fetcher,
     peekMyTasks
   )
-  const { data, refresh } = tasksQuery
+  const { data } = tasksQuery
+  // The user's open helpdesk tickets, shown on the board next to the tasks.
+  const ticketsQuery = useCachedQuery<TicketsInstanceResult[]>(
+    MY_TICKETS_QUERY_KEY,
+    fetchMyTickets,
+    peekMyTickets
+  )
+  const ticketResults = ticketsQuery.data
+  /** At least one instance has a helpdesk: the tickets toggle makes sense. */
+  const hasHelpdesk = (ticketResults ?? []).some(
+    (result) => result.ok && result.available
+  )
+  const tickets = useMemo(
+    () => (showTickets ? listTickets(ticketResults, instance) : []),
+    [showTickets, ticketResults, instance]
+  )
+  const { refresh: refreshTasks } = tasksQuery
+  const { refresh: refreshTickets } = ticketsQuery
+  const refresh = useCallback((): void => {
+    refreshTasks()
+    refreshTickets()
+  }, [refreshTasks, refreshTickets])
+  const isRefreshing = tasksQuery.isRefreshing || ticketsQuery.isRefreshing
 
   const projectOptions = useMemo(
     () =>
-      data === undefined ? [] : listProjects(data, { instance, showClosed }),
-    [data, instance, showClosed]
+      data === undefined
+        ? []
+        : listProjects(data, { instance, showClosed }, tickets),
+    [data, instance, showClosed, tickets]
   )
   const columns = useMemo(
     () =>
       data === undefined
         ? []
-        : buildBoard(data, {
-            instance,
-            showClosed,
-            query,
-            projects,
-            groupBy,
-          }),
-    [data, instance, showClosed, query, projects, groupBy]
+        : buildBoard(
+            data,
+            {
+              instance,
+              showClosed,
+              query,
+              projects,
+              groupBy,
+            },
+            tickets
+          ),
+    [data, instance, showClosed, query, projects, groupBy, tickets]
   )
   const closedCount = useMemo(
     () => (data === undefined ? 0 : countClosedTasks(data, instance)),
@@ -194,16 +243,27 @@ function KanbanWorkspace() {
     (result): result is Extract<MyTasksInstanceResult, { ok: false }> =>
       !result.ok
   )
+  // A ticket read failing on an instance whose tasks failed too is the same
+  // problem: it is reported once, above.
+  const ticketFailures = (ticketResults ?? []).filter(
+    (result): result is Extract<TicketsInstanceResult, { ok: false }> =>
+      !result.ok &&
+      !failures.some(
+        (failure) => failure.instanceIndex === result.instanceIndex
+      )
+  )
   const isTruncated = (data ?? []).some(
     (result) => result.ok && result.truncated
   )
-  const taskCount = columns.reduce(
-    (sum, column) => sum + column.tasks.length,
-    0
-  )
-  const hasAnyTask = (data ?? []).some(
-    (result) => result.ok && result.tasks.length > 0
-  )
+  const areTicketsTruncated =
+    showTickets &&
+    (ticketResults ?? []).some((result) => result.ok && result.truncated)
+  const cards = columns.flatMap((column) => column.cards)
+  const taskCount = cards.filter((card) => card.kind === "task").length
+  const ticketCount = cards.length - taskCount
+  const hasAnyTask =
+    (data ?? []).some((result) => result.ok && result.tasks.length > 0) ||
+    tickets.length > 0
 
   const toggleColumn = useCallback((key: string): void => {
     setToggled((current) => {
@@ -226,7 +286,7 @@ function KanbanWorkspace() {
       }),
       { description: target.name }
     )
-    // Logged hours changed in Odoo: read the tasks again.
+    // Logged hours changed in Odoo: read the tasks and tickets again.
     refresh()
   }
 
@@ -245,11 +305,7 @@ function KanbanWorkspace() {
             <EmptyDescription>{tasksQuery.error}</EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Button
-              variant="outline"
-              onClick={refresh}
-              disabled={tasksQuery.isRefreshing}
-            >
+            <Button variant="outline" onClick={refresh} disabled={isRefreshing}>
               {t("common.tryAgain")}
             </Button>
           </EmptyContent>
@@ -281,6 +337,7 @@ function KanbanWorkspace() {
                   setInstance("all")
                   setProjects(new Set())
                   setShowClosed(true)
+                  setShowTickets(true)
                 }}
               >
                 {t("common.clearFilters")}
@@ -307,7 +364,7 @@ function KanbanWorkspace() {
               showInstance={instance === "all" && instances.length > 1}
               onToggleCollapsed={toggleColumn}
               onOpenTask={(task) => taskDetails.open(toTaskMatch(task))}
-              onLogTime={(task) => quickLog.open(taskTarget(task))}
+              onLogTime={quickLog.open}
             />
           ))}
         </div>
@@ -326,12 +383,25 @@ function KanbanWorkspace() {
             <p className="text-sm text-muted-foreground">
               {data === undefined
                 ? t("kanban.subtitle")
-                : t(
-                    groupBy === "project"
-                      ? "kanban.summaryByProject"
-                      : "kanban.summary",
-                    { count: taskCount, columns: columns.length }
-                  )}
+                : ticketCount === 0
+                  ? t(
+                      groupBy === "project"
+                        ? "kanban.summaryByProject"
+                        : "kanban.summary",
+                      { count: taskCount, columns: columns.length }
+                    )
+                  : t(
+                      groupBy === "project"
+                        ? "kanban.summaryWithTicketsByProject"
+                        : "kanban.summaryWithTickets",
+                      {
+                        tasks: t("kanban.taskCount", { count: taskCount }),
+                        tickets: t("kanban.ticketCount", {
+                          count: ticketCount,
+                        }),
+                        count: columns.length,
+                      }
+                    )}
             </p>
           </div>
           <Tooltip>
@@ -341,11 +411,9 @@ function KanbanWorkspace() {
                 size="icon"
                 aria-label={t("kanban.refresh")}
                 onClick={refresh}
-                disabled={tasksQuery.isLoading || tasksQuery.isRefreshing}
+                disabled={tasksQuery.isLoading || isRefreshing}
               >
-                <RefreshCwIcon
-                  className={cn(tasksQuery.isRefreshing && "animate-spin")}
-                />
+                <RefreshCwIcon className={cn(isRefreshing && "animate-spin")} />
               </Button>
             </TooltipTrigger>
             <TooltipContent>{t("kanban.refresh")}</TooltipContent>
@@ -407,6 +475,17 @@ function KanbanWorkspace() {
             <ArchiveIcon />
             {t("kanban.showClosed")}
           </Toggle>
+          {hasHelpdesk && (
+            <Toggle
+              variant="outline"
+              size="sm"
+              pressed={showTickets}
+              onPressedChange={setShowTickets}
+            >
+              <LifeBuoyIcon />
+              {t("kanban.showTickets")}
+            </Toggle>
+          )}
           {!showClosed && closedCount > 0 && (
             <span className="text-xs text-muted-foreground">
               {t("kanban.closedHidden", { count: closedCount })}
@@ -421,14 +500,32 @@ function KanbanWorkspace() {
             message={failure.error}
           />
         ))}
+        {showTickets &&
+          ticketFailures.map((failure) => (
+            <InstanceErrorNotice
+              key={`tickets:${failure.instanceIndex}`}
+              instanceIndex={failure.instanceIndex}
+              message={failure.error}
+            />
+          ))}
         {data !== undefined && tasksQuery.error !== null && (
           <p role="alert" className="text-sm text-destructive">
             {t("kanban.refreshError", { message: tasksQuery.error })}
           </p>
         )}
+        {showTickets && data !== undefined && ticketsQuery.error !== null && (
+          <p role="alert" className="text-sm text-destructive">
+            {t("kanban.ticketsError", { message: ticketsQuery.error })}
+          </p>
+        )}
         {isTruncated && (
           <p className="text-sm text-muted-foreground">
             {t("kanban.truncated")}
+          </p>
+        )}
+        {areTicketsTruncated && (
+          <p className="text-sm text-muted-foreground">
+            {t("kanban.ticketsTruncated")}
           </p>
         )}
       </div>

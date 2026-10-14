@@ -126,7 +126,11 @@
     "removeLine": "Remove line",
     "removeLoggedLine": "Remove from list (stays in Odoo)",
     "editInOdoo": "Edit in Odoo",
-    "deleteFromOdoo": "Delete from Odoo"
+    "deleteFromOdoo": "Delete from Odoo",
+    "pickTask": "Pick a task",
+    "changeTask": "Change task",
+    "manualTask": "picked",
+    "manualTaskHint": "Task picked by hand: checking the line again keeps it."
   },
   "status": {
     "pending": "Pending",
@@ -202,7 +206,7 @@
   },
   "kanban": {
     "title": "My tasks",
-    "subtitle": "The Odoo tasks assigned to you, by stage.",
+    "subtitle": "The Odoo tasks and helpdesk tickets assigned to you, by stage.",
     "summary_one": "{{count}} task in {{columns}} stages",
     "summary_other": "{{count}} tasks in {{columns}} stages",
     "refresh": "Reload tasks from Odoo",
@@ -211,8 +215,8 @@
     "searchPlaceholder": "Reference, task or project",
     "boardLabel": "Task board, scrolls sideways",
     "loadError": "Couldn't load your tasks",
-    "emptyTitle": "No tasks assigned to you",
-    "emptyDescription": "Tasks assigned to you in your Odoo instances show up here, grouped by stage.",
+    "emptyTitle": "No tasks or tickets assigned to you",
+    "emptyDescription": "Tasks and open helpdesk tickets assigned to you in your Odoo instances show up here, grouped by stage.",
     "noMatch": "No tasks match these filters",
     "noMatchHint": "Try another search, or show all instances.",
     "truncated": "Only your 1,000 most important tasks per instance are shown.",
@@ -253,7 +257,18 @@
     },
     "showClosed": "Closed tasks",
     "closedHidden_one": "{{count}} closed task hidden",
-    "closedHidden_other": "{{count}} closed tasks hidden"
+    "closedHidden_other": "{{count}} closed tasks hidden",
+    "taskCount_one": "{{count}} task",
+    "taskCount_other": "{{count}} tasks",
+    "ticketCount_one": "{{count}} ticket",
+    "ticketCount_other": "{{count}} tickets",
+    "summaryWithTickets_one": "{{tasks}} and {{tickets}} in {{count}} stage",
+    "summaryWithTickets_other": "{{tasks}} and {{tickets}} in {{count}} stages",
+    "summaryWithTicketsByProject_one": "{{tasks}} and {{tickets}} in {{count}} project",
+    "summaryWithTicketsByProject_other": "{{tasks}} and {{tickets}} in {{count}} projects",
+    "showTickets": "Helpdesk tickets",
+    "ticketsError": "Couldn't load your helpdesk tickets: {{message}}",
+    "ticketsTruncated": "Only your 200 most important open tickets per instance are shown."
   },
   "quickLog": {
     "title": "Log time",
@@ -373,5 +388,27 @@
     "helpdeskMissingHint": "Tickets appear here when the Helpdesk app is installed on one of your Odoo instances.",
     "noOpenTickets": "No open ticket assigned to you",
     "noOpenTicketsHint": "Switch to all open tickets to find one assigned to someone else."
+  },
+  "assignTask": {
+    "title": "Pick the task",
+    "description": "Choose the instance, the project and the task this commit is logged on.",
+    "instance": "Instance",
+    "project": "Project",
+    "task": "Task",
+    "searchProject": "Search a project or customer",
+    "searchTask": "Search a task, reference or #ID",
+    "changeProject": "Change",
+    "noProjects": "No project accepts timesheets in this instance.",
+    "noProjectMatch": "No project matches",
+    "projectsTruncated": "Only the first 1,000 projects are listed. Search to narrow them down.",
+    "noTasks": "This project has no active task.",
+    "noTaskMatch": "No task matches",
+    "tasksTruncated": "Only the 500 latest tasks are listed. Type at least 2 characters to search all of them.",
+    "applyToOthers_one": "Also use it for the other line without a task that has the reference {{taskRef}}",
+    "applyToOthers_other": "Also use it for the {{count}} other lines without a task that have the reference {{taskRef}}",
+    "submit": "Use this task",
+    "assigned_one": "Task set on {{count}} line",
+    "assigned_other": "Task set on {{count}} lines",
+    "checkError": "The task is set, but Odoo couldn't be checked for time already logged"
   }
 }

@@ -54,14 +54,13 @@ import {
   searchTickets,
 } from "@/services/odooService"
 import type {
-  HelpdeskTicket,
   InstanceResult,
   KanbanTask,
   OdooTaskMatch,
   TaskSearchInstanceResult,
   TicketsInstanceResult,
 } from "@/types/timesheet"
-import { normalizeText } from "@/utils/kanban"
+import { matchesTicketSearch } from "@/utils/kanban"
 import {
   formatInstanceParam,
   parseInstanceParam,
@@ -262,20 +261,6 @@ function TaskResults({
   )
 }
 
-function matchesTicket(ticket: HelpdeskTicket, query: string): boolean {
-  const words = normalizeText(query).split(/\s+/).filter(Boolean)
-  const haystack = normalizeText(
-    [
-      ticket.name,
-      ticket.ref ?? "",
-      String(ticket.ticketId),
-      ticket.teamName ?? "",
-      ticket.projectName ?? "",
-    ].join(" ")
-  )
-  return words.every((word) => haystack.includes(word))
-}
-
 /**
  * The user's open tickets (filtered here by the query), or every open
  * ticket matching the query (searched in Odoo).
@@ -312,7 +297,7 @@ function TicketResults({
             ? result.tickets
             : []
         )
-        .filter((ticket) => !mine || matchesTicket(ticket, query)),
+        .filter((ticket) => !mine || matchesTicketSearch(ticket, query)),
     [search.data, instance, mine, query]
   )
 

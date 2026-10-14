@@ -1,18 +1,10 @@
-import type {
-  OdooTaskMatch,
-  ParsedCommit,
-  TimesheetEntry,
-} from "@/types/timesheet"
+import type { OdooTaskMatch, TimesheetEntry } from "@/types/timesheet"
 
 export const MIN_HOURS = 0.25
 export const MAX_HOURS = 24
 export const HOURS_STEP = 0.25
 /** Hours expected on a working day. */
 export const WORKDAY_HOURS = 8
-
-export type VerifiableEntry = TimesheetEntry & {
-  commit: ParsedCommit & { taskRef: string }
-}
 
 export type SubmittableEntry = TimesheetEntry & { task: OdooTaskMatch }
 
@@ -29,8 +21,42 @@ export function isEditable(entry: TimesheetEntry): boolean {
   return !isInOdoo(entry) && entry.activity === "idle"
 }
 
-export function canVerify(entry: TimesheetEntry): entry is VerifiableEntry {
-  return entry.commit.taskRef !== null && isEditable(entry)
+/**
+ * The line can be checked against Odoo: its reference is searched, or the
+ * task picked by hand is checked for time already logged.
+ */
+export function canVerify(entry: TimesheetEntry): boolean {
+  return (
+    isEditable(entry) &&
+    (entry.commit.taskRef !== null ||
+      (entry.isTaskManual && entry.task !== null))
+  )
+}
+
+/** A task can be picked by hand for any line that isn't in Odoo yet. */
+export function canAssignTask(entry: TimesheetEntry): boolean {
+  return isEditable(entry)
+}
+
+/**
+ * Other lines of the list that share this line's unknown reference and
+ * still have no task: the same choice usually applies to them too.
+ */
+export function findSameReferenceLines(
+  entry: TimesheetEntry,
+  entries: TimesheetEntry[]
+): TimesheetEntry[] {
+  const { taskRef } = entry.commit
+  if (taskRef === null) {
+    return []
+  }
+  return entries.filter(
+    (other) =>
+      other.id !== entry.id &&
+      other.task === null &&
+      other.commit.taskRef === taskRef &&
+      canAssignTask(other)
+  )
 }
 
 export function isSubmittable(

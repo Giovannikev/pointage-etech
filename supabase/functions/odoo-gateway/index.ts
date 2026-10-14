@@ -16,6 +16,8 @@
  *   { action: "SEARCH_TASKS", query, instanceIndex? }
  *   { action: "SEARCH_TICKETS", query, mine, instanceIndex? }
  *   { action: "LOG_TICKET_TIME", instanceIndex, ticketId, hours, description, date }
+ *   { action: "LIST_PROJECTS", instanceIndex }
+ *   { action: "LIST_PROJECT_TASKS", instanceIndex, projectId, query? }
  */
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
@@ -181,6 +183,22 @@ interface TicketQuery {
   instanceIndex: InstanceIndex | null
 }
 
+/** A project time can be logged in, for the manual task picker. */
+interface OdooProject {
+  instanceIndex: InstanceIndex
+  projectId: number
+  name: string
+  /** The project's customer, to tell same-name projects apart. */
+  partnerName: string | null
+}
+
+interface ProjectTaskQuery {
+  instanceIndex: InstanceIndex
+  projectId: number
+  /** Optional name or "#id" filter; empty lists the project's latest tasks. */
+  query: string
+}
+
 interface TicketTimeEntry {
   instanceIndex: InstanceIndex
   ticketId: number
@@ -250,6 +268,8 @@ type GatewayRequest =
     }
   | ({ action: "SEARCH_TICKETS" } & TicketQuery)
   | ({ action: "LOG_TICKET_TIME" } & TicketTimeEntry)
+  | { action: "LIST_PROJECTS"; instanceIndex: InstanceIndex }
+  | ({ action: "LIST_PROJECT_TASKS" } & ProjectTaskQuery)
 
 /* ------------------------------------------------------------------ */
 /* Request validation                                                  */
@@ -268,6 +288,8 @@ const HISTORY_LIMIT = 2_000
 const MAX_HISTORY_DAYS = 366
 const SEARCH_LIMIT = 50
 const MY_TICKETS_LIMIT = 200
+const PROJECT_LIST_LIMIT = 1_000
+const PROJECT_TASKS_LIMIT = 500
 const MIN_QUERY_LENGTH = 2
 const MAX_QUERY_LENGTH = 100
 const MS_PER_DAY = 86_400_000
@@ -538,8 +560,30 @@ function parseRequest(body: unknown): GatewayRequest {
     }
   }
 
+  if (body.action === "LIST_PROJECTS") {
+    if (!isInstanceIndex(body.instanceIndex)) {
+      throw new HttpError('"instanceIndex" is required.', 400)
+    }
+    return { action: "LIST_PROJECTS", instanceIndex: body.instanceIndex }
+  }
+
+  if (body.action === "LIST_PROJECT_TASKS") {
+    if (
+      !isInstanceIndex(body.instanceIndex) ||
+      !isPositiveInteger(body.projectId)
+    ) {
+      throw new HttpError('"instanceIndex" and "projectId" are required.', 400)
+    }
+    return {
+      action: "LIST_PROJECT_TASKS",
+      instanceIndex: body.instanceIndex,
+      projectId: body.projectId,
+      query: readQuery(body.query, true),
+    }
+  }
+
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS" or "LOG_TICKET_TIME".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS" or "LIST_PROJECT_TASKS".',
     400
   )
 }
@@ -948,7 +992,11 @@ function readEachInstance<T>(
         return { instanceIndex: index, ok: true, ...data }
       } catch (error) {
         if (error instanceof HttpError) {
-          return { instanceIndex: index, ok: false, error: errorMessage(error) }
+          return {
+            instanceIndex: index,
+            ok: false,
+            error: errorMessage(error),
+          }
         }
         throw error
       }
@@ -1699,6 +1747,95 @@ async function logTicketTime(
 }
 
 /* ------------------------------------------------------------------ */
+/* LIST_PROJECTS / LIST_PROJECT_TASKS (manual task picker)             */
+/* ------------------------------------------------------------------ */
+
+/** The instance's active projects that accept timesheets, by name. */
+async function listProjects(
+  instances: OdooInstanceSettings[],
+  instanceIndex: InstanceIndex
+): Promise<{ projects: OdooProject[]; truncated: boolean }> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  const available = await getModelFields(session, "project.project")
+  // allow_timesheets comes with Timesheets (hr_timesheet): without it, every
+  // project is listed and Odoo decides when the line is created.
+  const domain = available.has("allow_timesheets")
+    ? [["allow_timesheets", "=", true]]
+    : []
+  const records = await executeKw(
+    session,
+    "project.project",
+    "search_read",
+    [domain],
+    {
+      fields: [
+        "id",
+        "name",
+        ...(available.has("partner_id") ? ["partner_id"] : []),
+      ],
+      limit: PROJECT_LIST_LIMIT,
+      order: "name asc, id asc",
+    }
+  )
+  const raw = readRecords(records, session, "project")
+  return {
+    projects: raw.flatMap((record): OdooProject[] => {
+      if (
+        !isRecord(record) ||
+        !isPositiveInteger(record.id) ||
+        typeof record.name !== "string"
+      ) {
+        return []
+      }
+      return [
+        {
+          instanceIndex,
+          projectId: record.id,
+          name: record.name,
+          partnerName: readMany2one(record.partner_id)?.name ?? null,
+        },
+      ]
+    }),
+    truncated: raw.length >= PROJECT_LIST_LIMIT,
+  }
+}
+
+/** Active tasks of one project, assigned to anyone, latest first. */
+async function listProjectTasks(
+  instances: OdooInstanceSettings[],
+  { instanceIndex, projectId, query }: ProjectTaskQuery
+): Promise<{ tasks: KanbanTask[]; truncated: boolean }> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  const support = await detectTaskFields(session)
+  const id = readIdQuery(query)
+  const matches =
+    query === ""
+      ? []
+      : anyOf([
+          ["name", "ilike", query],
+          ...(id === null ? [] : [["id", "=", id]]),
+        ])
+  const records = await executeKw(
+    session,
+    "project.task",
+    "search_read",
+    [[["active", "=", true], ["project_id", "=", projectId], ...matches]],
+    {
+      fields: support.fields,
+      limit: PROJECT_TASKS_LIMIT,
+      order: "priority desc, id desc",
+    }
+  )
+  const raw = readRecords(records, session, "task")
+  return {
+    tasks: raw.flatMap(
+      (record) => readKanbanTask(record, instanceIndex, support) ?? []
+    ),
+    truncated: raw.length >= PROJECT_TASKS_LIMIT,
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP handler                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -1745,6 +1882,10 @@ serveJson("odoo-gateway", {
         return { instances: await searchTickets(instances, gatewayRequest) }
       case "LOG_TICKET_TIME":
         return await logTicketTime(instances, gatewayRequest)
+      case "LIST_PROJECTS":
+        return await listProjects(instances, gatewayRequest.instanceIndex)
+      case "LIST_PROJECT_TASKS":
+        return await listProjectTasks(instances, gatewayRequest)
     }
   },
 })

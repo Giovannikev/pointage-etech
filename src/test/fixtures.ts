@@ -71,6 +71,7 @@ export function timesheetEntry(
       projectName: "Project",
       instanceIndex: 1,
     },
+    isTaskManual: false,
     activity: "idle",
     statusDetail: null,
     odooTimesheetId: null,

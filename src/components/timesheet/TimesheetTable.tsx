@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
+import { AssignTaskDialog } from "@/components/timesheet/AssignTaskDialog"
 import { DeleteTimesheetDialog } from "@/components/timesheet/DeleteTimesheetDialog"
 import type { EditableTimesheet } from "@/components/timesheet/editableTimesheet"
 import { EditTimesheetDialog } from "@/components/timesheet/EditTimesheetDialog"
@@ -26,13 +27,24 @@ import {
 import { useDialogTarget } from "@/hooks/useDialogTarget"
 import { useFormatters } from "@/hooks/useFormatters"
 import { useTaskDetails } from "@/hooks/useTaskDetails"
-import type { TimesheetChanges, TimesheetEntry } from "@/types/timesheet"
+import type {
+  OdooTaskMatch,
+  TimesheetChanges,
+  TimesheetEntry,
+  VerificationSummary,
+} from "@/types/timesheet"
+import { findSameReferenceLines } from "@/utils/timesheetRules"
 
 type TimesheetTableProps = Omit<
   EntryHandlers,
-  "onOpenTask" | "onEditInOdoo" | "onDeleteFromOdoo"
+  "onOpenTask" | "onAssignTask" | "onEditInOdoo" | "onDeleteFromOdoo"
 > & {
   entries: TimesheetEntry[]
+  /** Attaches a task picked by hand to these lines, then checks Odoo. */
+  onAssignTask: (
+    ids: string[],
+    task: OdooTaskMatch
+  ) => Promise<VerificationSummary>
   /** Saves an edit of a line already in Odoo; rejects with Odoo's message. */
   onUpdateInOdoo: (id: string, changes: TimesheetChanges) => Promise<void>
   /** Deletes a line from Odoo; rejects with Odoo's message. */
@@ -91,7 +103,11 @@ function TimesheetCard({ entry, ...handlers }: EntryLayoutProps) {
         </div>
         <EntryStatus entry={entry} />
       </div>
-      <EntryTask entry={entry} onOpenTask={handlers.onOpenTask} />
+      <EntryTask
+        entry={entry}
+        onOpenTask={handlers.onOpenTask}
+        onAssignTask={handlers.onAssignTask}
+      />
       <EntryDescription
         entry={entry}
         onDescriptionChange={handlers.onDescriptionChange}
@@ -106,6 +122,7 @@ function TimesheetCard({ entry, ...handlers }: EntryLayoutProps) {
           onVerify={handlers.onVerify}
           onSubmit={handlers.onSubmit}
           onRemove={handlers.onRemove}
+          onAssignTask={handlers.onAssignTask}
           onEditInOdoo={handlers.onEditInOdoo}
           onDeleteFromOdoo={handlers.onDeleteFromOdoo}
         />
@@ -130,7 +147,11 @@ function TimesheetRow({ entry, ...handlers }: EntryLayoutProps) {
         <EntryProject entry={entry} />
       </TableCell>
       <TableCell className="max-w-56 pt-3">
-        <EntryTask entry={entry} onOpenTask={handlers.onOpenTask} />
+        <EntryTask
+          entry={entry}
+          onOpenTask={handlers.onOpenTask}
+          onAssignTask={handlers.onAssignTask}
+        />
       </TableCell>
       {/* w-full + max-w-0 gives this column the remaining width and lets the
           commit message truncate instead of widening the table. */}
@@ -154,6 +175,7 @@ function TimesheetRow({ entry, ...handlers }: EntryLayoutProps) {
           onVerify={handlers.onVerify}
           onSubmit={handlers.onSubmit}
           onRemove={handlers.onRemove}
+          onAssignTask={handlers.onAssignTask}
           onEditInOdoo={handlers.onEditInOdoo}
           onDeleteFromOdoo={handlers.onDeleteFromOdoo}
         />
@@ -169,6 +191,7 @@ function TimesheetRow({ entry, ...handlers }: EntryLayoutProps) {
  */
 export function TimesheetTable({
   entries,
+  onAssignTask,
   onUpdateInOdoo,
   onDeleteFromOdoo,
   ...handlers
@@ -178,6 +201,36 @@ export function TimesheetTable({
   const taskDetails = useTaskDetails()
   const editDialog = useDialogTarget<OdooLine>()
   const deleteDialog = useDialogTarget<OdooLine>()
+  /** Id of the line whose task is being picked. */
+  const assignDialog = useDialogTarget<string>()
+  // Read from the list each render, so the dialog sees the line as it is now.
+  const assignedEntry =
+    entries.find((entry) => entry.id === assignDialog.target) ?? null
+  const sameReferenceLines =
+    assignedEntry === null ? [] : findSameReferenceLines(assignedEntry, entries)
+
+  const handleAssign = async (
+    ids: string[],
+    task: OdooTaskMatch
+  ): Promise<void> => {
+    assignDialog.close()
+    const summary = await onAssignTask(ids, task)
+    if (summary.errorMessage !== null) {
+      toast.error(t("assignTask.checkError"), {
+        description: summary.errorMessage,
+      })
+      return
+    }
+    const parts = [task.taskName]
+    if (summary.alreadyLogged > 0) {
+      parts.push(
+        t("notifications.alreadyLogged", { count: summary.alreadyLogged })
+      )
+    }
+    toast.success(t("assignTask.assigned", { count: ids.length }), {
+      description: parts.join(" — "),
+    })
+  }
 
   const openFor =
     (open: (line: OdooLine) => void) =>
@@ -191,6 +244,7 @@ export function TimesheetTable({
   const entryHandlers: EntryHandlers = {
     ...handlers,
     onOpenTask: taskDetails.open,
+    onAssignTask: (entry) => assignDialog.open(entry.id),
     onEditInOdoo: openFor(editDialog.open),
     onDeleteFromOdoo: openFor(deleteDialog.open),
   }
@@ -249,7 +303,7 @@ export function TimesheetTable({
               <TableHead className="w-32">
                 {t("timesheet.columns.status")}
               </TableHead>
-              <TableHead className="w-28">
+              <TableHead className="w-36">
                 <span className="sr-only">
                   {t("timesheet.columns.actions")}
                 </span>
@@ -267,6 +321,13 @@ export function TimesheetTable({
       <TaskDetailsDialog
         state={taskDetails.state}
         onClose={taskDetails.close}
+      />
+      <AssignTaskDialog
+        open={assignDialog.isOpen && assignedEntry !== null}
+        entry={assignedEntry}
+        sameReferenceLines={sameReferenceLines}
+        onOpenChange={(open) => !open && assignDialog.close()}
+        onAssign={(ids, task) => void handleAssign(ids, task)}
       />
       <EditTimesheetDialog
         open={editDialog.isOpen}

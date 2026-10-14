@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest"
 
 import { kanbanTask } from "@/test/fixtures"
-import type { MyTasksInstanceResult } from "@/types/timesheet"
+import type {
+  HelpdeskTicket,
+  MyTasksInstanceResult,
+  TicketsInstanceResult,
+} from "@/types/timesheet"
 import {
   buildBoard,
+  cardKey,
   countClosedTasks,
   listProjects,
+  listTickets,
   matchesTaskSearch,
+  matchesTicketSearch,
   splitTaskName,
   type BoardFilters,
 } from "@/utils/kanban"
@@ -88,7 +95,26 @@ const filters = (overrides: Partial<BoardFilters> = {}): BoardFilters => ({
 })
 
 const taskIds = (board: ReturnType<typeof buildBoard>) =>
-  board.flatMap((column) => column.tasks.map((task) => task.taskId))
+  board.flatMap((column) =>
+    column.cards.flatMap((card) =>
+      card.kind === "task" ? [card.task.taskId] : []
+    )
+  )
+
+const ticket = (overrides: Partial<HelpdeskTicket> = {}): HelpdeskTicket => ({
+  instanceIndex: 1,
+  ticketId: 900,
+  name: "Imprimante en panne",
+  ref: "HT900",
+  stageName: "En cours",
+  teamName: "Support",
+  priority: 0,
+  projectId: 10,
+  projectName: "COGECI",
+  hoursSpent: 1.5,
+  loggable: true,
+  ...overrides,
+})
 
 describe("splitTaskName", () => {
   it("separates the bracketed reference", () => {
@@ -116,7 +142,7 @@ describe("matchesTaskSearch", () => {
 describe("buildBoard by stage", () => {
   it("merges same-name stages across projects and instances", () => {
     const board = buildBoard(results, filters())
-    expect(board.map((column) => [column.name, column.tasks.length])).toEqual([
+    expect(board.map((column) => [column.name, column.cards.length])).toEqual([
       ["En cours", 2],
       [null, 1],
     ])
@@ -173,5 +199,105 @@ describe("listProjects and countClosedTasks", () => {
   it("counts the closed tasks of the instance", () => {
     expect(countClosedTasks(results, "all")).toBe(2)
     expect(countClosedTasks(results, 2)).toBe(0)
+  })
+})
+
+describe("tickets on the board", () => {
+  const tickets = [
+    ticket(),
+    ticket({
+      ticketId: 901,
+      name: "Accès refusé",
+      ref: null,
+      stageName: "Nouveau",
+      priority: 2,
+      projectId: null,
+      projectName: null,
+      hoursSpent: null,
+    }),
+    ticket({
+      instanceIndex: 2,
+      ticketId: 902,
+      ref: "HT902",
+      projectId: 5,
+      projectName: "Enrôlement",
+    }),
+  ]
+  const ticketIds = (board: ReturnType<typeof buildBoard>) =>
+    board.flatMap((column) =>
+      column.cards.flatMap((card) =>
+        card.kind === "ticket" ? [card.ticket.ticketId] : []
+      )
+    )
+
+  it("joins the task column of the same stage name, else gets its own", () => {
+    const board = buildBoard(results, filters(), tickets)
+    expect(
+      board.map((column) => [column.name, column.cards.map(cardKey)])
+    ).toEqual([
+      ["En cours", ["task:1:1", "task:2:4", "ticket:1:900", "ticket:2:902"]],
+      ["Nouveau", ["ticket:1:901"]],
+      [null, ["task:2:5"]],
+    ])
+  })
+
+  it("adds the ticket hours to the column", () => {
+    const board = buildBoard(results, filters(), tickets)
+    expect(board[0].effectiveHours).toBe(3)
+  })
+
+  it("follows the instance, project and search filters", () => {
+    expect(
+      ticketIds(buildBoard(results, filters({ instance: 2 }), tickets))
+    ).toEqual([902])
+    expect(
+      ticketIds(
+        buildBoard(results, filters({ projects: new Set(["none"]) }), tickets)
+      )
+    ).toEqual([901])
+    expect(
+      ticketIds(buildBoard(results, filters({ query: "ht900" }), tickets))
+    ).toEqual([900])
+  })
+
+  it("groups tickets by project and counts them in the project filter", () => {
+    const board = buildBoard(results, filters({ groupBy: "project" }), tickets)
+    expect(board.map((column) => [column.key, column.cards.length])).toEqual([
+      ["1:10", 2],
+      ["2:5", 2],
+      ["none", 2],
+    ])
+    const options = listProjects(
+      results,
+      { instance: "all", showClosed: false },
+      tickets
+    )
+    expect(options.map((option) => [option.key, option.taskCount])).toEqual([
+      ["1:10", 2],
+      ["2:5", 2],
+      ["none", 2],
+    ])
+  })
+
+  it("lists the open tickets of the selected instances", () => {
+    const ticketResults: TicketsInstanceResult[] = [
+      {
+        instanceIndex: 1,
+        ok: true,
+        available: true,
+        truncated: false,
+        tickets: [tickets[0]],
+      },
+      { instanceIndex: 2, ok: false, error: "unreachable" },
+    ]
+    expect(listTickets(ticketResults, "all")).toEqual([tickets[0]])
+    expect(listTickets(ticketResults, 2)).toEqual([])
+    expect(listTickets(undefined, "all")).toEqual([])
+  })
+
+  it("searches title, reference, id, team and project", () => {
+    expect(matchesTicketSearch(tickets[0], "imprimante support")).toBe(true)
+    expect(matchesTicketSearch(tickets[0], "900")).toBe(true)
+    expect(matchesTicketSearch(tickets[0], "facture")).toBe(false)
   })
 })

@@ -126,7 +126,11 @@
     "removeLine": "Supprimer la ligne",
     "removeLoggedLine": "Retirer de la liste (reste dans Odoo)",
     "editInOdoo": "Modifier dans Odoo",
-    "deleteFromOdoo": "Supprimer d'Odoo"
+    "deleteFromOdoo": "Supprimer d'Odoo",
+    "pickTask": "Choisir une tâche",
+    "changeTask": "Changer de tâche",
+    "manualTask": "choisie",
+    "manualTaskHint": "Tâche choisie à la main : revérifier la ligne la conserve."
   },
   "status": {
     "pending": "En attente",
@@ -202,7 +206,7 @@
   },
   "kanban": {
     "title": "Mes tâches",
-    "subtitle": "Les tâches Odoo qui vous sont assignées, par étape.",
+    "subtitle": "Les tâches et tickets d'assistance Odoo qui vous sont assignés, par étape.",
     "summary_one": "{{count}} tâche dans {{columns}} étapes",
     "summary_other": "{{count}} tâches dans {{columns}} étapes",
     "refresh": "Recharger les tâches depuis Odoo",
@@ -211,8 +215,8 @@
     "searchPlaceholder": "Référence, tâche ou projet",
     "boardLabel": "Tableau des tâches, défilement horizontal",
     "loadError": "Impossible de charger vos tâches",
-    "emptyTitle": "Aucune tâche ne vous est assignée",
-    "emptyDescription": "Les tâches qui vous sont assignées dans vos instances Odoo apparaissent ici, regroupées par étape.",
+    "emptyTitle": "Aucune tâche ni ticket ne vous est assigné",
+    "emptyDescription": "Les tâches et les tickets d'assistance ouverts qui vous sont assignés dans vos instances Odoo apparaissent ici, regroupés par étape.",
     "noMatch": "Aucune tâche ne correspond à ces filtres",
     "noMatchHint": "Essayez une autre recherche, ou affichez toutes les instances.",
     "truncated": "Seules vos 1 000 tâches les plus importantes par instance sont affichées.",
@@ -253,7 +257,18 @@
     },
     "showClosed": "Tâches clôturées",
     "closedHidden_one": "{{count}} tâche clôturée masquée",
-    "closedHidden_other": "{{count}} tâches clôturées masquées"
+    "closedHidden_other": "{{count}} tâches clôturées masquées",
+    "taskCount_one": "{{count}} tâche",
+    "taskCount_other": "{{count}} tâches",
+    "ticketCount_one": "{{count}} ticket",
+    "ticketCount_other": "{{count}} tickets",
+    "summaryWithTickets_one": "{{tasks}} et {{tickets}} dans {{count}} étape",
+    "summaryWithTickets_other": "{{tasks}} et {{tickets}} dans {{count}} étapes",
+    "summaryWithTicketsByProject_one": "{{tasks}} et {{tickets}} dans {{count}} projet",
+    "summaryWithTicketsByProject_other": "{{tasks}} et {{tickets}} dans {{count}} projets",
+    "showTickets": "Tickets d'assistance",
+    "ticketsError": "Impossible de charger vos tickets d'assistance : {{message}}",
+    "ticketsTruncated": "Seuls vos 200 tickets ouverts les plus importants par instance sont affichés."
   },
   "quickLog": {
     "title": "Pointer du temps",
@@ -373,5 +388,27 @@
     "helpdeskMissingHint": "Les tickets apparaissent ici quand le module Assistance est installé sur l'une de vos instances Odoo.",
     "noOpenTickets": "Aucun ticket ouvert ne vous est assigné",
     "noOpenTicketsHint": "Passez à « Tous les tickets ouverts » pour en trouver un assigné à quelqu'un d'autre."
+  },
+  "assignTask": {
+    "title": "Choisir la tâche",
+    "description": "Choisissez l'instance, le projet et la tâche sur lesquels pointer ce commit.",
+    "instance": "Instance",
+    "project": "Projet",
+    "task": "Tâche",
+    "searchProject": "Rechercher un projet ou un client",
+    "searchTask": "Rechercher une tâche, une référence ou un #ID",
+    "changeProject": "Changer",
+    "noProjects": "Aucun projet n'accepte les feuilles de temps sur cette instance.",
+    "noProjectMatch": "Aucun projet ne correspond",
+    "projectsTruncated": "Seuls les 1 000 premiers projets sont listés. Utilisez la recherche pour affiner.",
+    "noTasks": "Ce projet n'a aucune tâche active.",
+    "noTaskMatch": "Aucune tâche ne correspond",
+    "tasksTruncated": "Seules les 500 dernières tâches sont listées. Tapez au moins 2 caractères pour chercher dans toutes.",
+    "applyToOthers_one": "L'utiliser aussi pour l'autre ligne sans tâche de la référence {{taskRef}}",
+    "applyToOthers_other": "L'utiliser aussi pour les {{count}} autres lignes sans tâche de la référence {{taskRef}}",
+    "submit": "Utiliser cette tâche",
+    "assigned_one": "Tâche rattachée à {{count}} ligne",
+    "assigned_other": "Tâche rattachée à {{count}} lignes",
+    "checkError": "La tâche est rattachée, mais impossible de vérifier dans Odoo le temps déjà pointé"
   }
 }

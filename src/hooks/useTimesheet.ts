@@ -32,6 +32,7 @@ import {
 import { getPresetPeriod, isInPeriod } from "@/utils/period"
 import { describeCommit } from "@/utils/timesheetDescription"
 import {
+  canAssignTask,
   canVerify,
   isEditable,
   isInOdoo,
@@ -75,6 +76,8 @@ type TimesheetAction =
   | { type: "verificationStarted"; ids: string[] }
   | { type: "verificationResolved"; resolutions: TaskResolution[] }
   | { type: "verificationFailed"; ids: string[]; message: string }
+  /** The user picked the task of these lines by hand. */
+  | { type: "taskAssigned"; ids: string[]; task: OdooTaskMatch }
   | { type: "submissionStarted"; ids: string[] }
   | { type: "submissionResolved"; ids: string[]; results: SubmissionResult[] }
   | { type: "submissionFailed"; ids: string[]; message: string }
@@ -114,6 +117,30 @@ function applyEdit(
       ? { status: "found" as const, statusDetail: null }
       : {}
   return { ...entry, ...patch, ...recovered }
+}
+
+/**
+ * Attaches a task picked by hand. The description is rebuilt with the task's
+ * title unless the user typed it; the check against Odoo follows.
+ */
+function withManualTask(
+  entry: TimesheetEntry,
+  task: OdooTaskMatch
+): TimesheetEntry {
+  if (!canAssignTask(entry)) {
+    return entry
+  }
+  return {
+    ...entry,
+    task,
+    isTaskManual: true,
+    status: "found",
+    statusDetail: null,
+    loggedHours: 0,
+    description: entry.isDescriptionEdited
+      ? entry.description
+      : describeCommit(entry.commit, task),
+  }
 }
 
 function resolveVerification(
@@ -306,11 +333,17 @@ function timesheetReducer(
       return updateWhere(entries, new Set(action.ids), (entry) => ({
         ...entry,
         activity: "idle",
-        task: null,
+        // A task picked by hand stays: only the check against Odoo failed.
+        task: entry.isTaskManual ? entry.task : null,
         status: "error",
         statusDetail: { reason: "serverError", message: action.message },
         loggedHours: 0,
       }))
+
+    case "taskAssigned":
+      return updateWhere(entries, new Set(action.ids), (entry) =>
+        withManualTask(entry, action.task)
+      )
 
     case "submissionStarted":
       return updateWhere(entries, new Set(action.ids), (entry) => ({
@@ -369,6 +402,7 @@ function createEntry({
     authoredAt,
     status: hasTaskRef ? "pending" : "missing",
     task: null,
+    isTaskManual: false,
     activity: "idle",
     statusDetail: hasTaskRef ? null : { reason: "noTaskReference" },
     odooTimesheetId: null,
@@ -449,6 +483,14 @@ export interface UseTimesheetResult {
   /** Fetches the period's commits; lines of other days leave the list. */
   importFromGithub: () => Promise<ImportSummary>
   verifyEntry: (id: string) => Promise<VerificationSummary>
+  /**
+   * Attaches a task picked by hand to these lines, then checks Odoo for time
+   * already logged on it, like a found reference.
+   */
+  assignTask: (
+    ids: string[],
+    task: OdooTaskMatch
+  ) => Promise<VerificationSummary>
   updateDescription: (id: string, description: string) => void
   updateHours: (id: string, hours: number) => void
   removeEntry: (id: string) => void
@@ -487,11 +529,23 @@ export function useTimesheet(): UseTimesheetResult {
 
       dispatch({ type: "verificationStarted", ids })
       try {
-        const taskRefs = [...new Set(verifiable.map((e) => e.commit.taskRef))]
-        const results = await searchTasks(taskRefs)
+        // Tasks picked by hand are kept: only references are searched.
+        const taskRefs = [
+          ...new Set(
+            verifiable.flatMap((entry) =>
+              entry.isTaskManual || entry.commit.taskRef === null
+                ? []
+                : [entry.commit.taskRef]
+            )
+          ),
+        ]
+        const results = taskRefs.length > 0 ? await searchTasks(taskRefs) : []
         const byRef = new Map(results.map((result) => [result.taskRef, result]))
         const matches = verifiable.map((entry): TaskMatch => {
-          const task = toTaskMatch(byRef.get(entry.commit.taskRef))
+          const task =
+            entry.isTaskManual && entry.task !== null
+              ? entry.task
+              : toTaskMatch(byRef.get(entry.commit.taskRef ?? ""))
           return {
             entry,
             task,
@@ -638,6 +692,34 @@ export function useTimesheet(): UseTimesheetResult {
     [entries, verify]
   )
 
+  const assignTask = useCallback(
+    async (
+      ids: string[],
+      task: OdooTaskMatch
+    ): Promise<VerificationSummary> => {
+      const wanted = new Set(ids)
+      const targets = entries
+        .filter((entry) => wanted.has(entry.id) && canAssignTask(entry))
+        .map((entry) => withManualTask(entry, task))
+      dispatch({
+        type: "taskAssigned",
+        ids: targets.map((entry) => entry.id),
+        task,
+      })
+      const verification = await verify(targets)
+      // The lines now take part in the workday: spread it again over their
+      // days (hours the user typed stay).
+      if (targets.length > 0) {
+        dispatch({
+          type: "hoursEstimated",
+          dates: [...new Set(targets.map((entry) => entry.date))],
+        })
+      }
+      return verification
+    },
+    [entries, verify]
+  )
+
   const submitEntry = useCallback(
     (id: string) => submit(entries.filter((entry) => entry.id === id)),
     [entries, submit]
@@ -733,6 +815,7 @@ export function useTimesheet(): UseTimesheetResult {
     importFromText,
     importFromGithub,
     verifyEntry,
+    assignTask,
     updateDescription,
     updateHours,
     removeEntry,

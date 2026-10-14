@@ -2,12 +2,18 @@ import { ChevronsLeftRightIcon, ChevronsRightLeftIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { KanbanCard } from "@/components/kanban/KanbanCard"
+import { TicketCard } from "@/components/tasks/TicketCard"
+import {
+  taskTarget,
+  ticketTarget,
+  type LogTarget,
+} from "@/components/timesheet/logTarget"
 import { Button } from "@/components/ui/button"
 import { useFormatters } from "@/hooks/useFormatters"
 import { INSTANCE_BACKGROUNDS } from "@/lib/instanceColors"
 import { cn } from "@/lib/utils"
 import type { KanbanTask } from "@/types/timesheet"
-import type { BoardColumn } from "@/utils/kanban"
+import { cardKey, type BoardColumn } from "@/utils/kanban"
 
 interface KanbanColumnProps {
   column: BoardColumn
@@ -15,7 +21,8 @@ interface KanbanColumnProps {
   showInstance: boolean
   onToggleCollapsed: (key: string) => void
   onOpenTask: (task: KanbanTask) => void
-  onLogTime: (task: KanbanTask) => void
+  /** Logs time on a task or a ticket of the column. */
+  onLogTime: (target: LogTarget) => void
 }
 
 export function KanbanColumn({
@@ -33,7 +40,7 @@ export function KanbanColumn({
     (column.kind === "project"
       ? t("kanban.projectFilter.noProject")
       : t("kanban.noStage"))
-  const count = column.tasks.length
+  const count = column.cards.length
   const instanceDot = showInstance && column.instanceIndex !== null && (
     <span
       aria-hidden
@@ -97,15 +104,23 @@ export function KanbanColumn({
         </Button>
       </header>
       <ul className="grid max-h-[calc(100svh-17rem)] min-h-24 content-start gap-2 overflow-y-auto px-2 pb-2">
-        {column.tasks.map((task) => (
-          <li key={`${task.instanceIndex}:${task.taskId}`}>
-            <KanbanCard
-              task={task}
-              showInstance={showInstance}
-              context={column.kind === "project" ? "stage" : "project"}
-              onOpenTask={onOpenTask}
-              onLogTime={onLogTime}
-            />
+        {column.cards.map((card) => (
+          <li key={cardKey(card)}>
+            {card.kind === "task" ? (
+              <KanbanCard
+                task={card.task}
+                showInstance={showInstance}
+                context={column.kind === "project" ? "stage" : "project"}
+                onOpenTask={onOpenTask}
+                onLogTime={(task) => onLogTime(taskTarget(task))}
+              />
+            ) : (
+              <TicketCard
+                ticket={card.ticket}
+                showInstance={showInstance}
+                onLogTime={(ticket) => onLogTime(ticketTarget(ticket))}
+              />
+            )}
           </li>
         ))}
       </ul>

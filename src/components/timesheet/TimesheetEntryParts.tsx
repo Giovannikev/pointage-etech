@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
+  Link2Icon,
   ListXIcon,
   LockIcon,
   PencilIcon,
@@ -23,6 +24,7 @@ import {
 import { useFormatters } from "@/hooks/useFormatters"
 import type { OdooTaskMatch, TimesheetEntry } from "@/types/timesheet"
 import {
+  canAssignTask,
   canVerify,
   isEditable,
   isInOdoo,
@@ -41,6 +43,8 @@ export interface EntryHandlers {
   onVerify: (id: string) => void
   onSubmit: (id: string) => void
   onRemove: (id: string) => void
+  /** Opens the task picker: instance, project and task chosen by hand. */
+  onAssignTask: (entry: TimesheetEntry) => void
   /** Opens the edit dialog of a line already in Odoo. */
   onEditInOdoo: (entry: TimesheetEntry) => void
   /** Opens the delete confirmation of a line already in Odoo. */
@@ -83,16 +87,40 @@ export function EntryProject({ entry }: EntryProps) {
 export function EntryTask({
   entry,
   onOpenTask,
-}: EntryProps & Pick<EntryHandlers, "onOpenTask">) {
+  onAssignTask,
+}: EntryProps & Pick<EntryHandlers, "onOpenTask" | "onAssignTask">) {
   const { t } = useTranslation()
   const { formatHours } = useFormatters()
   const { task } = entry
+  const canPick =
+    task === null && entry.status !== "pending" && canAssignTask(entry)
 
   return (
     <div className="min-w-0">
-      <span className="block font-mono text-xs text-muted-foreground">
-        {entry.commit.taskRef ?? t("timesheet.noReference")}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate font-mono text-xs text-muted-foreground">
+          {entry.commit.taskRef ?? t("timesheet.noReference")}
+        </span>
+        {entry.isTaskManual && task !== null && (
+          <span
+            className="shrink-0 rounded-sm bg-muted px-1 text-[0.65rem] leading-4 font-medium text-muted-foreground"
+            title={t("timesheet.manualTaskHint")}
+          >
+            {t("timesheet.manualTask")}
+          </span>
+        )}
       </span>
+      {canPick && (
+        <Button
+          variant="outline"
+          size="xs"
+          className="mt-1"
+          onClick={() => onAssignTask(entry)}
+        >
+          <Link2Icon />
+          {t("timesheet.pickTask")}
+        </Button>
+      )}
       {isWaitingForTask(entry) ? (
         <Skeleton className="mt-1 h-4 w-32" />
       ) : (
@@ -219,7 +247,12 @@ function canChangeInOdoo(entry: TimesheetEntry): boolean {
 type EntryActionsProps = EntryProps &
   Pick<
     EntryHandlers,
-    "onVerify" | "onSubmit" | "onRemove" | "onEditInOdoo" | "onDeleteFromOdoo"
+    | "onVerify"
+    | "onSubmit"
+    | "onRemove"
+    | "onAssignTask"
+    | "onEditInOdoo"
+    | "onDeleteFromOdoo"
   >
 
 export function EntryActions({
@@ -227,6 +260,7 @@ export function EntryActions({
   onVerify,
   onSubmit,
   onRemove,
+  onAssignTask,
   onEditInOdoo,
   onDeleteFromOdoo,
 }: EntryActionsProps) {
@@ -284,6 +318,17 @@ export function EntryActions({
 
   return (
     <div className="flex justify-end gap-0.5">
+      <RowAction
+        label={
+          entry.task === null
+            ? t("timesheet.pickTask")
+            : t("timesheet.changeTask")
+        }
+        disabled={!canAssignTask(entry)}
+        onClick={() => onAssignTask(entry)}
+      >
+        <Link2Icon />
+      </RowAction>
       <RowAction
         label={t("timesheet.checkAgain")}
         disabled={!canVerify(entry)}
