@@ -138,6 +138,8 @@ interface KanbanStage {
   name: string
   sequence: number
   folded: boolean
+  /** Projects using the stage. */
+  projectIds: number[]
 }
 
 interface TimesheetHistoryEntry {
@@ -1215,6 +1217,9 @@ function readKanbanStage(
     name: record.name,
     sequence: readNumber(record.sequence) ?? 0,
     folded: record.fold === true,
+    projectIds: Array.isArray(record.project_ids)
+      ? record.project_ids.filter(isPositiveInteger)
+      : [],
   }
 }
 
@@ -1236,7 +1241,7 @@ async function readStages(
     "search_read",
     [["|", ["id", "in", stageIds], ["project_ids", "in", projectIds]]],
     {
-      fields: ["id", "name", "sequence", "fold"],
+      fields: ["id", "name", "sequence", "fold", "project_ids"],
       order: "sequence asc, id asc",
     }
   )

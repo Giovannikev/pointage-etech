@@ -44,3 +44,42 @@ describe("reconcileWithOdoo", () => {
     expect(result.get("b")?.loggedHours).toBe(3.5)
   })
 })
+
+describe("reconcileWithOdoo with tickets", () => {
+  const ticketTask = {
+    taskId: 0,
+    taskName: "BFA vente",
+    projectId: 10,
+    projectName: "Matelec",
+    instanceIndex: 1 as const,
+    ticket: { ticketId: 1, ref: "HT1" },
+  }
+
+  it("matches ticket lines only with timesheets of the same ticket", () => {
+    const result = reconcileWithOdoo(
+      [
+        {
+          id: "ticket",
+          description: "Ajout de la fonction x",
+          date: "2026-10-12",
+          task: ticketTask,
+        },
+        {
+          id: "task",
+          description: "Ajout de la fonction x",
+          date: "2026-10-12",
+          task,
+        },
+      ],
+      [
+        // Task 1 and ticket 1 share an id but are different records.
+        logged({ timesheetId: 60, taskId: 0, ticketId: 1, hours: 0.5 }),
+        logged({ timesheetId: 61, hours: 2 }),
+      ]
+    )
+    expect(result.get("ticket")?.duplicate?.timesheetId).toBe(60)
+    expect(result.get("ticket")?.loggedHours).toBe(0.5)
+    expect(result.get("task")?.duplicate?.timesheetId).toBe(61)
+    expect(result.get("task")?.loggedHours).toBe(2)
+  })
+})

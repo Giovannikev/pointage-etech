@@ -355,6 +355,10 @@ function toKanbanStage(value: unknown): KanbanStage {
       name: value.name,
       sequence: value.sequence,
       folded: value.folded,
+      // Older gateways don't send the stage's projects.
+      projectIds: Array.isArray(value.projectIds)
+        ? value.projectIds.filter(isPositiveInteger)
+        : [],
     }
   }
   throw new InvalidResponseError(GATEWAY_FUNCTION)
@@ -450,6 +454,62 @@ export function fetchTimesheetHistory(
       ).map(toHistoryResult),
     options
   )
+}
+
+/** A ticket and day whose existing timesheets are looked up. */
+export interface TicketTimesheetLookup {
+  instanceIndex: OdooInstanceIndex
+  ticketId: number
+  date: string
+}
+
+/**
+ * The signed-in user's existing timesheets on these tickets and days, read
+ * from the timesheet history (FIND_TIMESHEETS only knows tasks). Rejects
+ * when an instance of the lookups can't be read.
+ */
+export async function findLoggedTicketTimesheets(
+  lookups: TicketTimesheetLookup[]
+): Promise<LoggedTimesheet[]> {
+  if (lookups.length === 0) {
+    return []
+  }
+  const dates = lookups.map((lookup) => lookup.date).sort()
+  const wanted = new Set(
+    lookups.map(
+      (lookup) => `${lookup.instanceIndex}:${lookup.ticketId}:${lookup.date}`
+    )
+  )
+  const instances = new Set(lookups.map((lookup) => lookup.instanceIndex))
+  const results = await fetchTimesheetHistory(
+    { from: dates[0], to: dates[dates.length - 1] },
+    { force: true }
+  )
+  const timesheets: LoggedTimesheet[] = []
+  for (const result of results) {
+    if (!instances.has(result.instanceIndex)) continue
+    if (!result.ok) {
+      throw new Error(result.error)
+    }
+    for (const entry of result.entries) {
+      if (
+        entry.ticketId !== null &&
+        wanted.has(`${entry.instanceIndex}:${entry.ticketId}:${entry.date}`)
+      ) {
+        timesheets.push({
+          instanceIndex: entry.instanceIndex,
+          taskId: 0,
+          ticketId: entry.ticketId,
+          date: entry.date,
+          timesheetId: entry.timesheetId,
+          hours: entry.hours,
+          description: entry.description,
+          locked: entry.locked,
+        })
+      }
+    }
+  }
+  return timesheets
 }
 
 export function peekTimesheetHistory(

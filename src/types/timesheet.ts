@@ -32,13 +32,28 @@ export interface ParsedCommit {
   frenchSummary: string
 }
 
-/** An Odoo task matched from a task reference. */
+/** The helpdesk ticket a line logs time on, instead of a project task. */
+export interface TicketLink {
+  ticketId: number
+  /** The ticket's reference when the instance has one (e.g. "HT10605"). */
+  ref: string | null
+}
+
+/**
+ * What a timesheet line is logged on: an Odoo task matched from a task
+ * reference or picked by hand, or a helpdesk ticket picked by hand.
+ */
 export interface OdooTaskMatch {
+  /** 0 for a ticket: a ticket line isn't logged on a task. */
   taskId: number
+  /** The task's name, or the ticket's title. */
   taskName: string
+  /** For a ticket: the project its helpdesk team logs time in. */
   projectId: number
   projectName: string
   instanceIndex: OdooInstanceIndex
+  /** Set when the line logs time on a helpdesk ticket (LOG_TICKET_TIME). */
+  ticket?: TicketLink
 }
 
 export type TimesheetStatus =
@@ -148,6 +163,8 @@ export interface FindTimesheetsRequest {
 
 /** A timesheet the signed-in user already logged in Odoo. */
 export interface LoggedTimesheet extends TimesheetLookup {
+  /** Set for a line logged on a helpdesk ticket; taskId is then 0. */
+  ticketId?: number
   timesheetId: number
   hours: number
   description: string
@@ -213,6 +230,8 @@ export interface KanbanStage {
   name: string
   sequence: number
   folded: boolean
+  /** Projects using the stage; empty when Odoo didn't say. */
+  projectIds: number[]
 }
 
 export interface GetMyTasksRequest {

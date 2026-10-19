@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { addDays, countDays, isIsoDate, toLocalIsoDate } from "@/utils/date"
+import {
+  addDays,
+  countDays,
+  formatTime,
+  isIsoDate,
+  toLocalIsoDate,
+} from "@/utils/date"
 
 // vitest.config.ts runs the tests in Madagascar's time zone (UTC+3).
 describe("toLocalIsoDate", () => {
@@ -21,5 +27,15 @@ describe("date helpers", () => {
   it("counts and adds days", () => {
     expect(countDays("2026-10-12", "2026-10-18")).toBe(7)
     expect(addDays("2026-10-31", 1)).toBe("2026-11-01")
+  })
+})
+
+describe("formatTime", () => {
+  it("shows the local clock time on 24 hours", () => {
+    expect(formatTime("2026-10-19T11:32:00Z", "fr")).toBe("14:32")
+    expect(formatTime("2026-10-19T11:32:00Z", "en")).toBe("14:32")
+  })
+  it("returns null for an invalid timestamp", () => {
+    expect(formatTime("not a date", "fr")).toBeNull()
   })
 })

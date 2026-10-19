@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useReducer, useState } from "react"
 
+import { logOnTarget, matchTarget } from "@/components/timesheet/logTarget"
 import { fetchCommits } from "@/services/commitSourceService"
 import {
   deleteTimesheet,
+  findLoggedTicketTimesheets,
   findLoggedTimesheets,
   searchTasks,
   submitTimesheets,
@@ -22,7 +24,7 @@ import type {
   TimesheetSubmission,
   VerificationSummary,
 } from "@/types/timesheet"
-import { parseCommitLog, parseCommitMessage } from "@/utils/commitParser"
+import { parseCommitMessage, parsePastedCommits } from "@/utils/commitParser"
 import { estimateHours, type EstimateLine } from "@/utils/hoursEstimate"
 import {
   NOT_LOGGED,
@@ -40,6 +42,7 @@ import {
   roundHours,
   type SubmittableEntry,
 } from "@/utils/timesheetRules"
+import { isTicketMatch, type TicketMatch } from "@/utils/timesheetTarget"
 
 const DEFAULT_HOURS = 1
 
@@ -434,11 +437,32 @@ function toLookup({ entry, task }: VerifiedEntry): TimesheetLookup {
   }
 }
 
-/** Matches found lines with the timesheets the user already has in Odoo. */
+/**
+ * Matches found lines with the timesheets the user already has in Odoo:
+ * task lines through FIND_TIMESHEETS, ticket lines through the history.
+ */
 async function reconcile(
   verified: VerifiedEntry[]
 ): Promise<Map<string, OdooReconciliation>> {
-  const timesheets = await findLoggedTimesheets(verified.map(toLookup))
+  const taskLines = verified.filter(({ task }) => !isTicketMatch(task))
+  const ticketLookups = verified.flatMap(({ entry, task }) =>
+    isTicketMatch(task)
+      ? [
+          {
+            instanceIndex: task.instanceIndex,
+            ticketId: task.ticket.ticketId,
+            date: entry.date,
+          },
+        ]
+      : []
+  )
+  const [taskTimesheets, ticketTimesheets] = await Promise.all([
+    taskLines.length > 0
+      ? findLoggedTimesheets(taskLines.map(toLookup))
+      : Promise.resolve([]),
+    findLoggedTicketTimesheets(ticketLookups),
+  ])
+  const timesheets = [...taskTimesheets, ...ticketTimesheets]
   return reconcileWithOdoo(
     verified.map(({ entry, task, description }) => ({
       id: entry.id,
@@ -464,6 +488,75 @@ function toSubmission(entry: SubmittableEntry): TimesheetSubmission {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong."
+}
+
+type TicketEntry = SubmittableEntry & { task: TicketMatch }
+
+function isTicketEntry(entry: SubmittableEntry): entry is TicketEntry {
+  return isTicketMatch(entry.task)
+}
+
+/** Ticket lines go one by one through LOG_TICKET_TIME; results are per line. */
+function submitTicketLines(
+  entries: TicketEntry[]
+): Promise<SubmissionResult[]> {
+  return Promise.all(
+    entries.map(async (entry): Promise<SubmissionResult> => {
+      try {
+        const timesheetId = await logOnTarget(matchTarget(entry.task), {
+          hours: entry.hours,
+          description: entry.description.trim(),
+          date: entry.date,
+        })
+        return { clientId: entry.id, success: true, timesheetId }
+      } catch (error) {
+        return {
+          clientId: entry.id,
+          success: false,
+          error: toErrorMessage(error),
+        }
+      }
+    })
+  )
+}
+
+/**
+ * Task lines in one batch, failing line by line: ticket lines sent at the
+ * same time may already be in Odoo, so a failing batch must not mark them.
+ */
+async function submitTaskBatch(
+  entries: SubmittableEntry[]
+): Promise<SubmissionResult[]> {
+  if (entries.length === 0) {
+    return []
+  }
+  try {
+    return await submitTimesheets(entries.map(toSubmission))
+  } catch (error) {
+    const message = toErrorMessage(error)
+    return entries.map((entry) => ({
+      clientId: entry.id,
+      success: false,
+      error: message,
+    }))
+  }
+}
+
+/** Task lines in one SUBMIT_TIMESHEET batch, ticket lines on their ticket. */
+async function submitLines(
+  entries: SubmittableEntry[]
+): Promise<SubmissionResult[]> {
+  const ticketLines = entries.filter(isTicketEntry)
+  const taskLines = entries.filter((entry) => !isTicketEntry(entry))
+  if (ticketLines.length === 0) {
+    // Unchanged path: a failing batch rejects and the caller reports it.
+    return submitTimesheets(taskLines.map(toSubmission))
+  }
+  const [taskResults, ticketResults] = await Promise.all([
+    submitTaskBatch(taskLines),
+    submitTicketLines(ticketLines),
+  ])
+  return [...taskResults, ...ticketResults]
 }
 
 function entryKey(rawMessage: string, date: string): string {
@@ -628,10 +721,10 @@ export function useTimesheet(): UseTimesheetResult {
   const importFromText = useCallback(
     (raw: string, date: string): Promise<ImportSummary> =>
       addAndVerify(
-        parseCommitLog(raw).map((commit) => ({
+        parsePastedCommits(raw, date).map(({ commit, authoredAt }) => ({
           commit,
           date,
-          authoredAt: null,
+          authoredAt,
         }))
       ),
     [addAndVerify]
@@ -664,7 +757,7 @@ export function useTimesheet(): UseTimesheetResult {
 
       dispatch({ type: "submissionStarted", ids })
       try {
-        const results = await submitTimesheets(ready.map(toSubmission))
+        const results = await submitLines(ready)
         dispatch({ type: "submissionResolved", ids, results })
 
         const submitted = results.filter(

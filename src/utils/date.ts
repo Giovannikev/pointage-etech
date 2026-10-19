@@ -85,3 +85,16 @@ export function toLocalIsoDate(value: string): string {
   const parsed = new Date(value)
   return Number.isNaN(parsed.getTime()) ? value.slice(0, 10) : toIsoDate(parsed)
 }
+
+/** Local clock time of an ISO timestamp, e.g. "14:32"; null when invalid. */
+export function formatTime(timestamp: string, locale: string): string | null {
+  const parsed = new Date(timestamp)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed.toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })
+}

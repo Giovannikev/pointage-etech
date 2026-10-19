@@ -1,6 +1,8 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
+  ExternalLinkIcon,
+  LifeBuoyIcon,
   Link2Icon,
   ListXIcon,
   LockIcon,
@@ -21,8 +23,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useOdooInstances } from "@/contexts/SettingsContext"
 import { useFormatters } from "@/hooks/useFormatters"
+import { cn } from "@/lib/utils"
 import type { OdooTaskMatch, TimesheetEntry } from "@/types/timesheet"
+import { getTicketUrl } from "@/utils/settings"
 import {
   canAssignTask,
   canVerify,
@@ -30,6 +35,11 @@ import {
   isInOdoo,
   isSubmittable,
 } from "@/utils/timesheetRules"
+import {
+  isTicketMatch,
+  ticketLabel,
+  type TicketMatch,
+} from "@/utils/timesheetTarget"
 
 /**
  * Pieces of a timesheet line, laid out as a table row on wide containers and
@@ -62,6 +72,60 @@ function isWaitingForTask(entry: TimesheetEntry): boolean {
 /** Accessible name of a line: its task reference, or its commit message. */
 function lineLabel(entry: TimesheetEntry): string {
   return entry.commit.taskRef ?? entry.commit.rawMessage
+}
+
+/**
+ * The day the line is logged on and, for a fetched or timed commit, the
+ * local time it was authored at. Stacked in the table, inline on cards.
+ */
+export function EntryDate({
+  entry,
+  stacked = false,
+}: EntryProps & { stacked?: boolean }) {
+  const { t } = useTranslation()
+  const { formatShortDate, formatTime } = useFormatters()
+  const time = entry.authoredAt === null ? null : formatTime(entry.authoredAt)
+
+  return (
+    <span
+      className={cn(
+        "text-muted-foreground",
+        stacked ? "grid gap-0.5" : "flex items-baseline gap-1.5"
+      )}
+    >
+      <span className="whitespace-nowrap">{formatShortDate(entry.date)}</span>
+      {time !== null && (
+        <span
+          className="font-mono text-xs tabular-nums"
+          title={t("timesheet.commitTime", { time })}
+        >
+          {time}
+        </span>
+      )}
+    </span>
+  )
+}
+
+/** The ticket of a line, linked to its form in Odoo. */
+function TicketName({ task }: { task: TicketMatch }) {
+  const { t } = useTranslation()
+  const instances = useOdooInstances()
+  const url = getTicketUrl(instances, task.instanceIndex, task.ticket.ticketId)
+  if (url === null) {
+    return <span className="block truncate">{task.taskName}</span>
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex max-w-full min-w-0 items-center gap-1 rounded-sm underline decoration-dotted underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+      title={t("timesheet.openTicket", { name: task.taskName })}
+    >
+      <span className="truncate">{task.taskName}</span>
+      <ExternalLinkIcon aria-hidden className="size-3 shrink-0" />
+    </a>
+  )
 }
 
 export function EntryInstance({ entry }: EntryProps) {
@@ -101,6 +165,15 @@ export function EntryTask({
         <span className="truncate font-mono text-xs text-muted-foreground">
           {entry.commit.taskRef ?? t("timesheet.noReference")}
         </span>
+        {task !== null && isTicketMatch(task) && (
+          <span
+            className="flex shrink-0 items-center gap-1 rounded-sm bg-muted px-1 font-mono text-[0.65rem] leading-4 font-medium text-muted-foreground"
+            title={t("timesheet.ticketLine")}
+          >
+            <LifeBuoyIcon aria-hidden className="size-3" />
+            {ticketLabel(task.ticket)}
+          </span>
+        )}
         {entry.isTaskManual && task !== null && (
           <span
             className="shrink-0 rounded-sm bg-muted px-1 text-[0.65rem] leading-4 font-medium text-muted-foreground"
@@ -126,14 +199,18 @@ export function EntryTask({
       ) : (
         task !== null && (
           <>
-            <button
-              type="button"
-              className="block max-w-full truncate rounded-sm text-left underline decoration-dotted underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
-              title={t("timesheet.showDetails", { name: task.taskName })}
-              onClick={() => onOpenTask(task)}
-            >
-              {task.taskName}
-            </button>
+            {isTicketMatch(task) ? (
+              <TicketName task={task} />
+            ) : (
+              <button
+                type="button"
+                className="block max-w-full truncate rounded-sm text-left underline decoration-dotted underline-offset-4 outline-none hover:text-primary focus-visible:ring-3 focus-visible:ring-ring/50"
+                title={t("timesheet.showDetails", { name: task.taskName })}
+                onClick={() => onOpenTask(task)}
+              >
+                {task.taskName}
+              </button>
+            )}
             {entry.status === "found" && entry.loggedHours > 0 && (
               <span
                 className="mt-1 flex items-center gap-1 text-xs font-medium text-warning"

@@ -334,11 +334,133 @@ export function parseCommitMessage(message: string): ParsedCommit | null {
   }
 }
 
+/** A pasted commit subject, with the time found next to it if any. */
+export interface PastedCommitLine {
+  message: string
+  time: CommitTime | null
+}
+
+/** A commit time read from pasted text. */
+export interface CommitTime {
+  /** YYYY-MM-DD when the text gave the day too. */
+  date: string | null
+  /** HH:mm:ss */
+  time: string
+  /** "+03:00" or "Z" when the text gave the offset; local time otherwise. */
+  offset: string | null
+}
+
+const MONTHS: Readonly<Record<string, string>> = {
+  jan: "01",
+  feb: "02",
+  mar: "03",
+  apr: "04",
+  may: "05",
+  jun: "06",
+  jul: "07",
+  aug: "08",
+  sep: "09",
+  oct: "10",
+  nov: "11",
+  dec: "12",
+}
+
+/** Bullet and short hash allowed before a time (`%h %ad %s`). */
+const LINE_LEAD =
+  /^(?:(?:[-*•]|\d+[.)])\s+)?(?:(?=[0-9a-f]*\d)[0-9a-f]{7,40}\s+)?/i
+/** `--date=iso`, `--date=iso-strict` or a plain "2026-10-19 14:32". */
+const ISO_TIMESTAMP =
+  /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?\s*(Z|[+-]\d{2}:?\d{2})?(?=\s|$)/i
+/** `--date=format:%H:%M`: "14:32" or "14:32:10". */
+const TIME_ONLY = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?=\s|$)/
+/** Default `git log` date: "Mon Oct 19 14:32:10 2026 +0300". */
+const GIT_DEFAULT_DATE =
+  /^[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})(?:\s+([+-]\d{4}))?/
+const GIT_DATE_LINE = /^Date:\s+(.+)$/m
+
+function isClockTime(hours: string, minutes: string, seconds = "00"): boolean {
+  return Number(hours) < 24 && Number(minutes) < 60 && Number(seconds) < 60
+}
+
+/** "+0300" -> "+03:00"; "Z" stays. */
+function normalizeOffset(offset: string | undefined): string | null {
+  if (offset === undefined) return null
+  if (offset.toUpperCase() === "Z") return "Z"
+  const digits = offset.replace(":", "")
+  return `${digits.slice(0, 3)}:${digits.slice(3)}`
+}
+
+function clock(hours: string, minutes: string, seconds = "00"): string {
+  return `${hours.padStart(2, "0")}:${minutes}:${seconds}`
+}
+
+/** The commit time at the start of the text, and its length. */
+function readLeadingTime(
+  text: string
+): { time: CommitTime; length: number } | null {
+  const iso = ISO_TIMESTAMP.exec(text)
+  if (iso !== null && isClockTime(iso[2], iso[3], iso[4])) {
+    return {
+      time: {
+        date: iso[1],
+        time: clock(iso[2], iso[3], iso[4]),
+        offset: normalizeOffset(iso[5]),
+      },
+      length: iso[0].length,
+    }
+  }
+  const only = TIME_ONLY.exec(text)
+  if (only !== null && isClockTime(only[1], only[2], only[3])) {
+    return {
+      time: {
+        date: null,
+        time: clock(only[1], only[2], only[3]),
+        offset: null,
+      },
+      length: only[0].length,
+    }
+  }
+  return null
+}
+
+/** The date of a `git log` block's "Date:" line, in any of git's formats. */
+function readGitDate(value: string): CommitTime | null {
+  const leading = readLeadingTime(value.trim())
+  if (leading !== null) {
+    return leading.time
+  }
+  const parts = GIT_DEFAULT_DATE.exec(value.trim())
+  const month = parts === null ? undefined : MONTHS[parts[1].toLowerCase()]
+  if (parts === null || month === undefined) {
+    return null
+  }
+  return {
+    date: `${parts[6]}-${month}-${parts[2].padStart(2, "0")}`,
+    time: clock(parts[3], parts[4], parts[5]),
+    offset: normalizeOffset(parts[7]),
+  }
+}
+
 /**
- * Splits pasted text into commit subjects. Handles one commit per line
- * (`git log --oneline`, plain lists) and the default `git log` format.
+ * Takes the time out of a one-line commit, keeping the bullet and hash:
+ * "a1b2c3d 14:32 [03-500] add x" -> "a1b2c3d [03-500] add x" at 14:32.
  */
-export function splitCommitMessages(raw: string): string[] {
+function splitLineTime(line: string): PastedCommitLine {
+  const lead = LINE_LEAD.exec(line)?.[0] ?? ""
+  const found = readLeadingTime(line.slice(lead.length))
+  if (found === null) {
+    return { message: line, time: null }
+  }
+  const message = `${lead}${line.slice(lead.length + found.length).trimStart()}`
+  return { message: message.trim(), time: found.time }
+}
+
+/**
+ * Splits pasted text into commit subjects, each with the time pasted next
+ * to it when there is one. Handles one commit per line (`git log --oneline`,
+ * `--pretty="%h %ad %s"`, plain lists) and the default `git log` format.
+ */
+export function splitCommitLines(raw: string): PastedCommitLine[] {
   const text = raw.replace(/\r\n?/g, "\n")
 
   if (!GIT_LOG_HEADER.test(text)) {
@@ -346,27 +468,75 @@ export function splitCommitMessages(raw: string): string[] {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line !== "")
+      .map(splitLineTime)
   }
 
   return text
     .split(GIT_LOG_HEADER)
     .slice(1)
-    .map((block) => block.split("\n").find((line) => /^\s+\S/.test(line)))
-    .filter((subject): subject is string => subject !== undefined)
-    .map((subject) => subject.trim())
+    .flatMap((block) => {
+      const subject = block.split("\n").find((line) => /^\s+\S/.test(line))
+      if (subject === undefined) {
+        return []
+      }
+      const dateLine = GIT_DATE_LINE.exec(block)
+      return [
+        {
+          message: subject.trim(),
+          time: dateLine === null ? null : readGitDate(dateLine[1]),
+        },
+      ]
+    })
+}
+
+/**
+ * Splits pasted text into commit subjects. Handles one commit per line
+ * (`git log --oneline`, plain lists) and the default `git log` format.
+ */
+export function splitCommitMessages(raw: string): string[] {
+  return splitCommitLines(raw).map((line) => line.message)
+}
+
+/**
+ * ISO timestamp of a pasted commit time. A time without a day falls on
+ * `date`; a time without an offset is read in the browser's time zone.
+ */
+export function toAuthoredAt(time: CommitTime, date: string): string | null {
+  const parsed = new Date(
+    `${time.date ?? date}T${time.time}${time.offset ?? ""}`
+  )
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
+/** A pasted commit, timed when its time was pasted with it. */
+export interface PastedCommit {
+  commit: ParsedCommit
+  /** ISO timestamp; null when no time was pasted. */
+  authoredAt: string | null
+}
+
+/**
+ * Parses pasted commits, skipping merge commits and duplicates. `date` is
+ * the day the lines are logged on, used for times pasted without a day.
+ */
+export function parsePastedCommits(raw: string, date: string): PastedCommit[] {
+  const seen = new Set<string>()
+  const commits: PastedCommit[] = []
+
+  for (const line of splitCommitLines(raw)) {
+    const parsed = parseCommitMessage(line.message)
+    if (parsed !== null && !seen.has(parsed.rawMessage)) {
+      seen.add(parsed.rawMessage)
+      commits.push({
+        commit: parsed,
+        authoredAt: line.time === null ? null : toAuthoredAt(line.time, date),
+      })
+    }
+  }
+  return commits
 }
 
 /** Parses pasted commits, skipping merge commits and duplicates. */
 export function parseCommitLog(raw: string): ParsedCommit[] {
-  const seen = new Set<string>()
-  const commits: ParsedCommit[] = []
-
-  for (const message of splitCommitMessages(raw)) {
-    const parsed = parseCommitMessage(message)
-    if (parsed !== null && !seen.has(parsed.rawMessage)) {
-      seen.add(parsed.rawMessage)
-      commits.push(parsed)
-    }
-  }
-  return commits
+  return parsePastedCommits(raw, "1970-01-01").map(({ commit }) => commit)
 }

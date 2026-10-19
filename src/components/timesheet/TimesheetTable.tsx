@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/timesheet/StatusBadge"
 import { TaskDetailsDialog } from "@/components/timesheet/TaskDetailsDialog"
 import {
   EntryActions,
+  EntryDate,
   EntryDescription,
   EntryHours,
   EntryInstance,
@@ -86,7 +87,6 @@ function EntryStatus({ entry }: { entry: TimesheetEntry }) {
 /** A line as a card, for containers too narrow for the table. */
 function TimesheetCard({ entry, ...handlers }: EntryLayoutProps) {
   const { t } = useTranslation()
-  const { formatShortDate } = useFormatters()
 
   return (
     <li
@@ -94,8 +94,8 @@ function TimesheetCard({ entry, ...handlers }: EntryLayoutProps) {
       className="grid min-w-0 content-start gap-3 rounded-xl border bg-card p-4"
     >
       <div className="flex min-w-0 items-center gap-2 text-sm">
-        <span className="shrink-0 whitespace-nowrap text-muted-foreground">
-          {formatShortDate(entry.date)}
+        <span className="shrink-0">
+          <EntryDate entry={entry} />
         </span>
         <EntryInstance entry={entry} />
         <div className="min-w-0 flex-1">
@@ -133,12 +133,10 @@ function TimesheetCard({ entry, ...handlers }: EntryLayoutProps) {
 
 /** A line as a table row, for wide containers. */
 function TimesheetRow({ entry, ...handlers }: EntryLayoutProps) {
-  const { formatShortDate } = useFormatters()
-
   return (
     <TableRow data-status={entry.status} className="align-top">
-      <TableCell className="pt-3.5 whitespace-nowrap text-muted-foreground">
-        {formatShortDate(entry.date)}
+      <TableCell className="pt-3.5 whitespace-nowrap">
+        <EntryDate entry={entry} stacked />
       </TableCell>
       <TableCell className="pt-3.5">
         <EntryInstance entry={entry} />
@@ -227,7 +225,11 @@ export function TimesheetTable({
         t("notifications.alreadyLogged", { count: summary.alreadyLogged })
       )
     }
-    toast.success(t("assignTask.assigned", { count: ids.length }), {
+    const title =
+      task.ticket === undefined
+        ? t("assignTask.assigned", { count: ids.length })
+        : t("assignTask.assignedTicket", { count: ids.length })
+    toast.success(title, {
       description: parts.join(" — "),
     })
   }

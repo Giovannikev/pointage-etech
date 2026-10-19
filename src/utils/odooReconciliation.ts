@@ -1,5 +1,6 @@
 import type { LoggedTimesheet, OdooTaskMatch } from "@/types/timesheet"
 import { roundHours } from "@/utils/timesheetRules"
+import { loggedTimesheetKey, matchKey } from "@/utils/timesheetTarget"
 
 interface ReconciliationTarget {
   id: string
@@ -21,8 +22,8 @@ export const NOT_LOGGED: OdooReconciliation = {
   loggedHours: 0,
 }
 
-function dayKey(instanceIndex: number, taskId: number, date: string): string {
-  return `${instanceIndex}:${taskId}:${date}`
+function dayKey(targetKey: string, date: string): string {
+  return `${targetKey}:${date}`
 }
 
 function normalizeDescription(description: string): string {
@@ -31,7 +32,7 @@ function normalizeDescription(description: string): string {
 
 /**
  * Compares lines with the user's existing Odoo timesheets on the same task
- * and day. A timesheet with the same description marks a line as already
+ * (or ticket) and day. A timesheet with the same description marks a line as already
  * logged; each timesheet matches one line at most, so two identical commits
  * against one timesheet leave the second line submittable.
  */
@@ -41,11 +42,7 @@ export function reconcileWithOdoo(
 ): Map<string, OdooReconciliation> {
   const byDay = new Map<string, LoggedTimesheet[]>()
   for (const timesheet of timesheets) {
-    const key = dayKey(
-      timesheet.instanceIndex,
-      timesheet.taskId,
-      timesheet.date
-    )
+    const key = dayKey(loggedTimesheetKey(timesheet), timesheet.date)
     byDay.set(key, [...(byDay.get(key) ?? []), timesheet])
   }
   const matched = new Set<LoggedTimesheet>()
@@ -53,9 +50,7 @@ export function reconcileWithOdoo(
   return new Map(
     targets.map((target) => {
       const sameDay =
-        byDay.get(
-          dayKey(target.task.instanceIndex, target.task.taskId, target.date)
-        ) ?? []
+        byDay.get(dayKey(matchKey(target.task), target.date)) ?? []
       const description = normalizeDescription(target.description)
       const duplicate =
         sameDay.find(

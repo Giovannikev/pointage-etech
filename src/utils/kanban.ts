@@ -341,8 +341,9 @@ function placeCard(
 }
 
 /**
- * Groups the tasks, and the open tickets when given, into columns. Only
- * columns holding cards are returned.
+ * Groups the tasks, and the open tickets when given, into columns named
+ * after the Odoo stages and ordered by their sequence. Only columns holding
+ * cards are returned, plus the empty stages of the picked projects.
  */
 export function buildBoard(
   results: MyTasksInstanceResult[],
@@ -389,6 +390,37 @@ export function buildBoard(
     column.folded = column.folded && placement.folded
     column.cards.push(card)
     column.effectiveHours += cardHours(card) ?? 0
+  }
+
+  // With projects picked, their empty stages show too, as in Odoo, so the
+  // columns follow the projects' own pipeline. Not while searching, and
+  // folded stages only with closed tasks shown: their tasks are hidden.
+  if (groupBy === "stage" && projects.size > 0 && query.trim() === "") {
+    for (const stage of stages.values()) {
+      if (stage.folded && !scope.showClosed) continue
+      const isUsed = stage.projectIds.some((projectId) =>
+        projects.has(
+          projectKey({ instanceIndex: stage.instanceIndex, projectId })
+        )
+      )
+      if (!isUsed) continue
+      const key = normalizeText(stage.name)
+      const column = columns.get(key)
+      if (column === undefined) {
+        columns.set(key, {
+          key,
+          kind: "stage",
+          name: stage.name,
+          instanceIndex: null,
+          sequence: stage.sequence,
+          folded: stage.folded,
+          cards: [],
+          effectiveHours: 0,
+        })
+      } else {
+        column.sequence = Math.min(column.sequence, stage.sequence)
+      }
+    }
   }
 
   return [...columns.values()]

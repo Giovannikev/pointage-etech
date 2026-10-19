@@ -6,7 +6,14 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react"
-import { CheckIcon, Link2Icon, SearchIcon } from "lucide-react"
+import {
+  CheckIcon,
+  FolderKanbanIcon,
+  LifeBuoyIcon,
+  Link2Icon,
+  SearchIcon,
+  StarIcon,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { TaskStatusBadge } from "@/components/kanban/TaskStatusBadge"
@@ -35,19 +42,36 @@ import {
   fetchProjectTasks,
   peekProjects,
   peekProjectTasks,
+  peekTickets,
+  searchTickets,
 } from "@/services/odooService"
 import type {
+  HelpdeskTicket,
   KanbanTask,
   ListProjectsResponse,
   ListProjectTasksResponse,
   OdooInstanceIndex,
   OdooTaskMatch,
+  TicketsInstanceResult,
   TimesheetEntry,
 } from "@/types/timesheet"
-import { normalizeText, splitTaskName } from "@/utils/kanban"
+import {
+  matchesTicketSearch,
+  normalizeText,
+  splitTaskName,
+} from "@/utils/kanban"
+import {
+  isSameMatch,
+  isTicketMatch,
+  ticketLabel,
+  toTicketMatch,
+} from "@/utils/timesheetTarget"
 
 /** Mirrors MIN_QUERY_LENGTH in the odoo-gateway Edge Function. */
 const MIN_QUERY_LENGTH = 2
+
+/** What the commit is logged on: a project task or a helpdesk ticket. */
+type TargetKind = "task" | "ticket"
 
 /** The project chosen in the picker. */
 interface PickedProject {
@@ -132,10 +156,12 @@ function ListError({
 function OptionRow({
   isSelected,
   onSelect,
+  disabled = false,
   children,
 }: {
   isSelected: boolean
   onSelect: () => void
+  disabled?: boolean
   children: ReactNode
 }) {
   return (
@@ -143,8 +169,9 @@ function OptionRow({
       <button
         type="button"
         aria-pressed={isSelected}
+        disabled={disabled}
         className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent",
           isSelected && "bg-muted font-medium"
         )}
         onClick={onSelect}
@@ -345,6 +372,172 @@ function TaskList({
   )
 }
 
+/** Tickets of one instance among the results of every instance. */
+function instanceTickets(
+  results: TicketsInstanceResult[] | undefined,
+  instanceIndex: OdooInstanceIndex
+): TicketsInstanceResult | undefined {
+  return results?.find((result) => result.instanceIndex === instanceIndex)
+}
+
+function TicketRow({
+  ticket,
+  isSelected,
+  onSelect,
+}: {
+  ticket: HelpdeskTicket
+  isSelected: boolean
+  onSelect: (ticket: HelpdeskTicket) => void
+}) {
+  const { t } = useTranslation()
+  const { formatHours } = useFormatters()
+  const team = ticket.teamName ?? ticket.projectName
+  return (
+    <OptionRow
+      isSelected={isSelected}
+      disabled={!ticket.loggable}
+      onSelect={() => onSelect(ticket)}
+    >
+      <span className="grid min-w-0 flex-1 gap-0.5">
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 font-mono text-xs text-muted-foreground">
+            {ticketLabel(ticket)}
+          </span>
+          {ticket.priority > 0 && (
+            <StarIcon
+              className="size-3 shrink-0 fill-warning text-warning"
+              aria-label={t("kanban.starred")}
+            />
+          )}
+          <span className="truncate" title={ticket.name}>
+            {ticket.name}
+          </span>
+        </span>
+        <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+          {ticket.stageName !== null && (
+            <span className="shrink-0 rounded-sm bg-muted px-1 leading-4">
+              {ticket.stageName}
+            </span>
+          )}
+          {team !== null && <span className="truncate">{team}</span>}
+          {ticket.projectName !== null &&
+            ticket.teamName !== null &&
+            ticket.projectName !== ticket.teamName && (
+              <span className="truncate">{ticket.projectName}</span>
+            )}
+          {ticket.hoursSpent !== null && ticket.hoursSpent > 0 && (
+            <span className="ml-auto shrink-0 tabular-nums">
+              {formatHours(ticket.hoursSpent)}
+            </span>
+          )}
+        </span>
+        {!ticket.loggable && (
+          <span className="text-xs font-normal text-muted-foreground">
+            {t("assignTask.ticketNotLoggable")}
+          </span>
+        )}
+      </span>
+    </OptionRow>
+  )
+}
+
+/**
+ * The user's open tickets of the instance, or, from 2 characters typed,
+ * every open ticket matching the search (title, reference or #id).
+ */
+function TicketList({
+  instanceIndex,
+  search,
+  listId,
+  selectedTicketId,
+  onSelect,
+}: {
+  instanceIndex: OdooInstanceIndex
+  search: string
+  listId: string
+  selectedTicketId: number | null
+  onSelect: (ticket: HelpdeskTicket) => void
+}) {
+  const { t } = useTranslation()
+  const debouncedSearch = useDebouncedValue(search.trim(), 350)
+  const serverQuery =
+    debouncedSearch.length >= MIN_QUERY_LENGTH ? debouncedSearch : ""
+  const mine = serverQuery === ""
+  const fetcher = useCallback(
+    ({ force }: { force: boolean }) =>
+      searchTickets(serverQuery, mine, { force }),
+    [serverQuery, mine]
+  )
+  const peek = useCallback(
+    () => peekTickets(serverQuery, mine),
+    [serverQuery, mine]
+  )
+  const query = useCachedQuery<TicketsInstanceResult[]>(
+    `pickerTickets:${mine ? "mine" : "all"}:${serverQuery}`,
+    fetcher,
+    peek
+  )
+  const result = instanceTickets(query.data, instanceIndex)
+  const visible = useMemo(() => {
+    if (result === undefined || !result.ok) return []
+    // The user's own tickets are filtered here as they type; a search in
+    // Odoo already matched its results.
+    const tickets = mine
+      ? result.tickets.filter((ticket) => matchesTicketSearch(ticket, search))
+      : result.tickets
+    // Tickets time can be logged on first; Odoo's order is kept otherwise.
+    return [
+      ...tickets.filter((ticket) => ticket.loggable),
+      ...tickets.filter((ticket) => !ticket.loggable),
+    ]
+  }, [result, mine, search])
+
+  if (query.isLoading) return <ListSkeleton />
+  if (query.data === undefined) {
+    return <ListError message={query.error} onRetry={query.refresh} />
+  }
+  if (result !== undefined && !result.ok) {
+    return <ListError message={result.error} onRetry={query.refresh} />
+  }
+  if (result === undefined || !result.available) {
+    return (
+      <p className="rounded-lg border px-3 py-6 text-center text-sm text-muted-foreground">
+        {t("assignTask.noHelpdesk")}
+      </p>
+    )
+  }
+
+  return (
+    <>
+      <ul
+        id={listId}
+        aria-label={t("assignTask.ticket")}
+        className="grid max-h-72 overflow-y-auto rounded-lg border p-1"
+      >
+        {visible.map((ticket) => (
+          <TicketRow
+            key={ticket.ticketId}
+            ticket={ticket}
+            isSelected={ticket.ticketId === selectedTicketId}
+            onSelect={onSelect}
+          />
+        ))}
+        {visible.length === 0 && (
+          <li className="px-2 py-6 text-center text-sm text-muted-foreground">
+            {mine && search.trim() === ""
+              ? t("assignTask.noTickets")
+              : t("assignTask.noTicketMatch")}
+          </li>
+        )}
+      </ul>
+      <p className="text-xs text-muted-foreground">
+        {mine ? t("assignTask.myTicketsHint") : t("assignTask.allTicketsHint")}
+        {result.truncated && ` ${t("assignTask.ticketsTruncated")}`}
+      </p>
+    </>
+  )
+}
+
 interface AssignTaskFormProps {
   entry: TimesheetEntry
   /** Lines without a task that share this line's reference. */
@@ -367,7 +560,7 @@ function AssignTaskForm({
     current?.instanceIndex ?? instances[0]?.index ?? 1
   )
   const [project, setProject] = useState<PickedProject | null>(
-    current === null
+    current === null || isTicketMatch(current)
       ? null
       : {
           projectId: current.projectId,
@@ -375,9 +568,13 @@ function AssignTaskForm({
           partnerName: null,
         }
   )
+  const [kind, setKind] = useState<TargetKind>(
+    current !== null && isTicketMatch(current) ? "ticket" : "task"
+  )
   const [task, setTask] = useState<OdooTaskMatch | null>(current)
   const [projectSearch, setProjectSearch] = useState("")
   const [taskSearch, setTaskSearch] = useState("")
+  const [ticketSearch, setTicketSearch] = useState("")
   const [applyToOthers, setApplyToOthers] = useState(true)
 
   const changeInstance = (next: OdooInstanceIndex): void => {
@@ -387,6 +584,25 @@ function AssignTaskForm({
     setTask(null)
     setProjectSearch("")
     setTaskSearch("")
+    setTicketSearch("")
+  }
+
+  const changeKind = (next: TargetKind): void => {
+    if (next === kind) return
+    setKind(next)
+    // The line's current target stays picked when going back to its kind.
+    const keepsCurrent =
+      current !== null &&
+      current.instanceIndex === instanceIndex &&
+      isTicketMatch(current) === (next === "ticket")
+    setTask(keepsCurrent ? current : null)
+  }
+
+  const selectTicket = (picked: HelpdeskTicket): void => {
+    const match = toTicketMatch(picked)
+    if (match !== null) {
+      setTask(match)
+    }
   }
 
   const changeProject = (next: PickedProject | null): void => {
@@ -419,8 +635,11 @@ function AssignTaskForm({
     task !== null &&
     current !== null &&
     entry.isTaskManual &&
-    task.instanceIndex === current.instanceIndex &&
-    task.taskId === current.taskId
+    isSameMatch(task, current)
+  const selectedTicketId =
+    task !== null && isTicketMatch(task) && task.instanceIndex === instanceIndex
+      ? task.ticket.ticketId
+      : null
 
   return (
     <form onSubmit={handleSubmit} className="grid min-w-0 gap-4">
@@ -481,54 +700,108 @@ function AssignTaskForm({
       )}
 
       <div className="grid gap-2">
-        <Label id={`${fieldId}-project`}>{t("assignTask.project")}</Label>
-        {project === null ? (
+        <Label id={`${fieldId}-kind`}>{t("assignTask.kindLabel")}</Label>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          aria-labelledby={`${fieldId}-kind`}
+          value={kind}
+          className="flex-wrap"
+          onValueChange={(value) => {
+            if (value === "task" || value === "ticket") {
+              changeKind(value)
+            }
+          }}
+        >
+          <ToggleGroupItem value="task">
+            <FolderKanbanIcon />
+            {t("assignTask.kinds.task")}
+          </ToggleGroupItem>
+          <ToggleGroupItem value="ticket">
+            <LifeBuoyIcon />
+            {t("assignTask.kinds.ticket")}
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+
+      {kind === "ticket" && (
+        <div className="grid gap-2">
+          <Label id={`${fieldId}-ticket`}>{t("assignTask.ticket")}</Label>
           <div
             className="grid gap-2"
             role="group"
-            aria-labelledby={`${fieldId}-project`}
+            aria-labelledby={`${fieldId}-ticket`}
           >
             <SearchField
-              value={projectSearch}
-              onChange={setProjectSearch}
-              placeholder={t("assignTask.searchProject")}
-              controls={`${fieldId}-projects`}
+              value={ticketSearch}
+              onChange={setTicketSearch}
+              placeholder={t("assignTask.searchTicket")}
+              controls={`${fieldId}-tickets`}
               autoFocus
             />
-            <ProjectList
+            <TicketList
               instanceIndex={instanceIndex}
-              search={projectSearch}
-              listId={`${fieldId}-projects`}
-              onSelect={changeProject}
+              search={ticketSearch}
+              listId={`${fieldId}-tickets`}
+              selectedTicketId={selectedTicketId}
+              onSelect={selectTicket}
             />
           </div>
-        ) : (
-          <div
-            role="group"
-            aria-labelledby={`${fieldId}-project`}
-            className="flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm"
-          >
-            <span className="min-w-0 flex-1 truncate font-medium">
-              {project.name}
-            </span>
-            {project.partnerName !== null && (
-              <span className="max-w-40 shrink-0 truncate text-xs text-muted-foreground">
-                {project.partnerName}
-              </span>
-            )}
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => changeProject(null)}
-            >
-              {t("assignTask.changeProject")}
-            </Button>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {project !== null && (
+      {kind === "task" && (
+        <div className="grid gap-2">
+          <Label id={`${fieldId}-project`}>{t("assignTask.project")}</Label>
+          {project === null ? (
+            <div
+              className="grid gap-2"
+              role="group"
+              aria-labelledby={`${fieldId}-project`}
+            >
+              <SearchField
+                value={projectSearch}
+                onChange={setProjectSearch}
+                placeholder={t("assignTask.searchProject")}
+                controls={`${fieldId}-projects`}
+                autoFocus
+              />
+              <ProjectList
+                instanceIndex={instanceIndex}
+                search={projectSearch}
+                listId={`${fieldId}-projects`}
+                onSelect={changeProject}
+              />
+            </div>
+          ) : (
+            <div
+              role="group"
+              aria-labelledby={`${fieldId}-project`}
+              className="flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {project.name}
+              </span>
+              {project.partnerName !== null && (
+                <span className="max-w-40 shrink-0 truncate text-xs text-muted-foreground">
+                  {project.partnerName}
+                </span>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => changeProject(null)}
+              >
+                {t("assignTask.changeProject")}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {kind === "task" && project !== null && (
         <div className="grid gap-2">
           <Label id={`${fieldId}-task`}>{t("assignTask.task")}</Label>
           <div
@@ -549,7 +822,9 @@ function AssignTaskForm({
               search={taskSearch}
               listId={`${fieldId}-tasks`}
               selectedTaskId={
-                task !== null && task.instanceIndex === instanceIndex
+                task !== null &&
+                !isTicketMatch(task) &&
+                task.instanceIndex === instanceIndex
                   ? task.taskId
                   : null
               }
@@ -584,7 +859,9 @@ function AssignTaskForm({
         </DialogClose>
         <Button type="submit" disabled={task === null || isUnchanged}>
           <Link2Icon />
-          {t("assignTask.submit")}
+          {kind === "ticket"
+            ? t("assignTask.submitTicket")
+            : t("assignTask.submit")}
         </Button>
       </DialogFooter>
     </form>
@@ -602,8 +879,9 @@ interface AssignTaskDialogProps {
 }
 
 /**
- * Picks the task of a commit by hand: instance, then project, then task.
- * Used when the commit's reference isn't found, or to log it elsewhere.
+ * Picks the target of a commit by hand: instance, then a project and one of
+ * its tasks, or a helpdesk ticket. Used when the commit's reference isn't
+ * found, or to log it elsewhere.
  */
 export function AssignTaskDialog({
   open,

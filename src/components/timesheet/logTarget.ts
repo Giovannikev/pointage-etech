@@ -3,6 +3,7 @@ import type {
   HelpdeskTicket,
   KanbanTask,
   OdooInstanceIndex,
+  OdooTaskMatch,
 } from "@/types/timesheet"
 
 /** What time is logged on: a project task or a helpdesk ticket. */
@@ -44,6 +45,32 @@ export function ticketTarget(ticket: HelpdeskTicket): LogTarget {
     ref: ticket.ref,
     projectName: ticket.projectName,
     blockedReason: ticket.loggable ? null : "noTicketTimesheet",
+  }
+}
+
+/** The target of a timesheet line: its task, or the ticket picked for it. */
+export function matchTarget(match: OdooTaskMatch): LogTarget {
+  if (match.ticket !== undefined) {
+    return {
+      kind: "ticket",
+      instanceIndex: match.instanceIndex,
+      id: match.ticket.ticketId,
+      projectId: match.projectId,
+      name: match.taskName,
+      ref: match.ticket.ref,
+      projectName: match.projectName,
+      blockedReason: null,
+    }
+  }
+  return {
+    kind: "task",
+    instanceIndex: match.instanceIndex,
+    id: match.taskId,
+    projectId: match.projectId,
+    name: match.taskName,
+    ref: null,
+    projectName: match.projectName,
+    blockedReason: null,
   }
 }
 

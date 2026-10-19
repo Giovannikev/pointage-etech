@@ -130,7 +130,10 @@
     "pickTask": "Choisir une tâche",
     "changeTask": "Changer de tâche",
     "manualTask": "choisie",
-    "manualTaskHint": "Tâche choisie à la main : revérifier la ligne la conserve."
+    "manualTaskHint": "Tâche choisie à la main : revérifier la ligne la conserve.",
+    "commitTime": "Commit à {{time}}",
+    "ticketLine": "Le temps est pointé sur ce ticket d'assistance",
+    "openTicket": "{{name}} (ouvrir le ticket dans Odoo)"
   },
   "status": {
     "pending": "En attente",
@@ -169,7 +172,12 @@
     "date": "Date de la feuille de temps",
     "import": "Importer les commits",
     "importCount_one": "Importer {{count}} commit",
-    "importCount_other": "Importer {{count}} commits"
+    "importCount_other": "Importer {{count}} commits",
+    "preview": "Commits détectés",
+    "noTime": "Aucune heure collée pour ce commit",
+    "moreCommits_one": "Et {{count}} autre commit",
+    "moreCommits_other": "Et {{count}} autres commits",
+    "timeHint": "Pour garder l'heure de chaque commit, collez-la avant le message (<code>14:32 [03-500] …</code>) ou utilisez <code>git log --date=iso</code>."
   },
   "notifications": {
     "fetchError": "Impossible de récupérer vos commits GitHub",
@@ -391,7 +399,7 @@
   },
   "assignTask": {
     "title": "Choisir la tâche",
-    "description": "Choisissez l'instance, le projet et la tâche sur lesquels pointer ce commit.",
+    "description": "Choisissez l'instance, puis la tâche de projet ou le ticket d'assistance sur lequel pointer ce commit.",
     "instance": "Instance",
     "project": "Projet",
     "task": "Tâche",
@@ -409,6 +417,23 @@
     "submit": "Utiliser cette tâche",
     "assigned_one": "Tâche rattachée à {{count}} ligne",
     "assigned_other": "Tâche rattachée à {{count}} lignes",
-    "checkError": "La tâche est rattachée, mais impossible de vérifier dans Odoo le temps déjà pointé"
+    "checkError": "La tâche est rattachée, mais impossible de vérifier dans Odoo le temps déjà pointé",
+    "kindLabel": "Pointer sur",
+    "kinds": {
+      "task": "Tâche de projet",
+      "ticket": "Ticket d'assistance"
+    },
+    "ticket": "Ticket",
+    "searchTicket": "Rechercher un ticket, une référence (HT…) ou un #ID",
+    "myTicketsHint": "Vos tickets ouverts. Tapez au moins 2 caractères pour chercher dans tous les tickets ouverts.",
+    "allTicketsHint": "Tickets ouverts correspondant à votre recherche.",
+    "ticketsTruncated": "Seuls les premiers résultats sont listés : affinez la recherche.",
+    "noTickets": "Vous n'avez aucun ticket ouvert sur cette instance. Tapez au moins 2 caractères pour chercher dans tous les tickets ouverts.",
+    "noTicketMatch": "Aucun ticket ne correspond",
+    "noHelpdesk": "L'application Assistance n'est pas installée sur cette instance.",
+    "ticketNotLoggable": "Impossible de pointer sur ce ticket : son équipe d'assistance n'a pas de projet de feuilles de temps.",
+    "submitTicket": "Utiliser ce ticket",
+    "assignedTicket_one": "Ticket rattaché à {{count}} ligne",
+    "assignedTicket_other": "Ticket rattaché à {{count}} lignes"
   }
 }

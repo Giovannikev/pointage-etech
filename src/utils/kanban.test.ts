@@ -30,6 +30,7 @@ const results: MyTasksInstanceResult[] = [
         name: "En cours",
         sequence: 5,
         folded: false,
+        projectIds: [],
       },
       {
         instanceIndex: 1,
@@ -37,6 +38,7 @@ const results: MyTasksInstanceResult[] = [
         name: "Terminé",
         sequence: 9,
         folded: true,
+        projectIds: [],
       },
     ],
     tasks: [
@@ -61,6 +63,7 @@ const results: MyTasksInstanceResult[] = [
         name: "en cours",
         sequence: 2,
         folded: false,
+        projectIds: [],
       },
     ],
     tasks: [
@@ -299,5 +302,82 @@ describe("tickets on the board", () => {
     expect(matchesTicketSearch(tickets[0], "imprimante support")).toBe(true)
     expect(matchesTicketSearch(tickets[0], "900")).toBe(true)
     expect(matchesTicketSearch(tickets[0], "facture")).toBe(false)
+  })
+})
+
+describe("buildBoard with the stages of picked projects", () => {
+  const stage = (
+    stageId: number,
+    name: string,
+    sequence: number,
+    folded = false
+  ) => ({
+    instanceIndex: 1 as const,
+    stageId,
+    name,
+    sequence,
+    folded,
+    projectIds: [10],
+  })
+
+  // The PRF MATELEC pipeline: one task in "Test interne".
+  const matelec: MyTasksInstanceResult[] = [
+    {
+      instanceIndex: 1,
+      ok: true,
+      truncated: false,
+      stages: [
+        stage(1, "A reviser", 1),
+        stage(2, "Backlog", 2),
+        stage(3, "Test interne", 4),
+        stage(4, "Corrections", 6),
+        stage(5, "Annulé", 9, true),
+      ],
+      tasks: [
+        kanbanTask({
+          taskId: 308,
+          name: "[01-308] Seuil de déclenchement",
+          stageId: 3,
+          stageName: "Test interne",
+          projectId: 10,
+          status: "in_progress",
+        }),
+      ],
+    },
+  ]
+
+  it("keeps the task in its Odoo stage and shows the empty stages in order", () => {
+    const board = buildBoard(matelec, filters({ projects: new Set(["1:10"]) }))
+    expect(board.map((column) => column.name)).toEqual([
+      "A reviser",
+      "Backlog",
+      "Test interne",
+      "Corrections",
+    ])
+    const column = board.find((candidate) => candidate.name === "Test interne")
+    expect(column?.cards).toHaveLength(1)
+    expect(
+      board.filter((candidate) => candidate.cards.length > 0)
+    ).toHaveLength(1)
+  })
+
+  it("shows folded stages only with closed tasks", () => {
+    const board = buildBoard(
+      matelec,
+      filters({ projects: new Set(["1:10"]), showClosed: true })
+    )
+    expect(board.map((column) => column.name)).toContain("Annulé")
+  })
+
+  it("keeps only the columns with cards without a project or while searching", () => {
+    expect(buildBoard(matelec, filters()).map((column) => column.name)).toEqual(
+      ["Test interne"]
+    )
+    expect(
+      buildBoard(
+        matelec,
+        filters({ projects: new Set(["1:10"]), query: "seuil" })
+      ).map((column) => column.name)
+    ).toEqual(["Test interne"])
   })
 })

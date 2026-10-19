@@ -130,7 +130,10 @@
     "pickTask": "Pick a task",
     "changeTask": "Change task",
     "manualTask": "picked",
-    "manualTaskHint": "Task picked by hand: checking the line again keeps it."
+    "manualTaskHint": "Task picked by hand: checking the line again keeps it.",
+    "commitTime": "Committed at {{time}}",
+    "ticketLine": "Time is logged on this helpdesk ticket",
+    "openTicket": "{{name}} (open the ticket in Odoo)"
   },
   "status": {
     "pending": "Pending",
@@ -169,7 +172,12 @@
     "date": "Timesheet date",
     "import": "Import commits",
     "importCount_one": "Import {{count}} commit",
-    "importCount_other": "Import {{count}} commits"
+    "importCount_other": "Import {{count}} commits",
+    "preview": "Detected commits",
+    "noTime": "No time pasted for this commit",
+    "moreCommits_one": "And {{count}} more commit",
+    "moreCommits_other": "And {{count}} more commits",
+    "timeHint": "To keep each commit's time, paste it before the message (<code>14:32 [03-500] …</code>) or use <code>git log --date=iso</code>."
   },
   "notifications": {
     "fetchError": "Couldn't fetch your commits from GitHub",
@@ -391,7 +399,7 @@
   },
   "assignTask": {
     "title": "Pick the task",
-    "description": "Choose the instance, the project and the task this commit is logged on.",
+    "description": "Choose the instance, then the project task or the helpdesk ticket to log this commit on.",
     "instance": "Instance",
     "project": "Project",
     "task": "Task",
@@ -409,6 +417,23 @@
     "submit": "Use this task",
     "assigned_one": "Task set on {{count}} line",
     "assigned_other": "Task set on {{count}} lines",
-    "checkError": "The task is set, but Odoo couldn't be checked for time already logged"
+    "checkError": "The task is set, but Odoo couldn't be checked for time already logged",
+    "kindLabel": "Log on",
+    "kinds": {
+      "task": "Project task",
+      "ticket": "Helpdesk ticket"
+    },
+    "ticket": "Ticket",
+    "searchTicket": "Search a ticket, a reference (HT…) or an #ID",
+    "myTicketsHint": "Your open tickets. Type at least 2 characters to search every open ticket.",
+    "allTicketsHint": "Open tickets matching your search.",
+    "ticketsTruncated": "Only the first results are listed: refine the search.",
+    "noTickets": "You have no open ticket on this instance. Type at least 2 characters to search every open ticket.",
+    "noTicketMatch": "No ticket matches",
+    "noHelpdesk": "The Helpdesk app isn't installed on this instance.",
+    "ticketNotLoggable": "Time can't be logged on this ticket: its helpdesk team has no timesheet project.",
+    "submitTicket": "Use this ticket",
+    "assignedTicket_one": "Ticket attached to {{count}} line",
+    "assignedTicket_other": "Ticket attached to {{count}} lines"
   }
 }

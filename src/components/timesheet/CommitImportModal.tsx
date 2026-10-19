@@ -15,14 +15,70 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { parseCommitLog } from "@/utils/commitParser"
+import { useFormatters } from "@/hooks/useFormatters"
+import { parsePastedCommits, type PastedCommit } from "@/utils/commitParser"
 import { todayIsoDate } from "@/utils/date"
 
 const PLACEHOLDER = [
   "[03-500] matelec_sale: add french translations",
-  "[03-512] matelec_stock: fix rounding on delivery order",
-  "a1b2c3d [03-498] update access rights",
+  "14:32 [03-512] matelec_stock: fix rounding on delivery order",
+  "a1b2c3d 2026-10-19 16:05 [03-498] update access rights",
 ].join("\n")
+
+/** Long pastes only preview their first commits; all of them are imported. */
+const PREVIEW_LIMIT = 50
+
+/** The detected commits, each with its local time when one was pasted. */
+function CommitPreview({
+  commits,
+  date,
+}: {
+  commits: PastedCommit[]
+  date: string
+}) {
+  const { t } = useTranslation()
+  const { formatShortDate, formatTime } = useFormatters()
+  const shown = commits.slice(0, PREVIEW_LIMIT)
+  const dayLabel = formatShortDate(date)
+
+  return (
+    <ul
+      aria-label={t("pasteDialog.preview")}
+      className="grid max-h-44 gap-0.5 overflow-y-auto rounded-lg border p-1.5"
+    >
+      {shown.map(({ commit, authoredAt }) => {
+        const time = authoredAt === null ? null : formatTime(authoredAt)
+        return (
+          <li
+            key={commit.rawMessage}
+            className="flex min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-xs"
+          >
+            <span className="shrink-0 text-muted-foreground">{dayLabel}</span>
+            <span
+              className="w-10 shrink-0 font-mono text-muted-foreground tabular-nums"
+              title={time === null ? t("pasteDialog.noTime") : undefined}
+            >
+              {time ?? "—"}
+            </span>
+            <span
+              className="min-w-0 truncate font-mono"
+              title={commit.rawMessage}
+            >
+              {commit.rawMessage}
+            </span>
+          </li>
+        )
+      })}
+      {commits.length > shown.length && (
+        <li className="px-1.5 py-1 text-xs text-muted-foreground">
+          {t("pasteDialog.moreCommits", {
+            count: commits.length - shown.length,
+          })}
+        </li>
+      )}
+    </ul>
+  )
+}
 
 interface CommitImportModalProps {
   open: boolean
@@ -39,8 +95,13 @@ function CommitImportForm({
   const [date, setDate] = useState(todayIsoDate)
   const [isImporting, setIsImporting] = useState(false)
 
-  const commits = useMemo(() => parseCommitLog(raw), [raw])
-  const withoutRef = commits.filter((commit) => commit.taskRef === null).length
+  const commits = useMemo(() => parsePastedCommits(raw, date), [raw, date])
+  const withoutRef = commits.filter(
+    ({ commit }) => commit.taskRef === null
+  ).length
+  const withoutTime = commits.filter(
+    ({ authoredAt }) => authoredAt === null
+  ).length
   const canImport = commits.length > 0 && !isImporting
 
   const handleSubmit = async (
@@ -91,6 +152,15 @@ function CommitImportForm({
                   : "",
               ].join(" ")}
         </p>
+        {commits.length > 0 && <CommitPreview commits={commits} date={date} />}
+        {withoutTime > 0 && (
+          <p className="text-xs text-muted-foreground">
+            <Trans
+              i18nKey="pasteDialog.timeHint"
+              components={{ code: <code /> }}
+            />
+          </p>
+        )}
       </div>
 
       <div className="grid gap-2 sm:max-w-48">

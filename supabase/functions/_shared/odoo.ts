@@ -23,6 +23,12 @@ export interface OdooConnection {
 export interface OdooSession {
   connection: OdooConnection
   uid: number
+  /**
+   * Sent with every call. Holds the user's language, so translated names
+   * (stages, projects...) read as in the Odoo interface: without it, Odoo
+   * returns the en_US value, which may be an outdated name.
+   */
+  context?: Record<string, unknown>
 }
 
 let rpcRequestId = 0
@@ -161,6 +167,8 @@ export function executeKw(
   kwargs: Record<string, unknown> = {}
 ): Promise<unknown> {
   const { connection, uid } = session
+  const callContext = isRecord(kwargs.context) ? kwargs.context : {}
+  const context = { ...session.context, ...callContext }
   return callService(connection, "object", "execute_kw", [
     connection.db,
     uid,
@@ -168,8 +176,51 @@ export function executeKw(
     model,
     method,
     args,
-    kwargs,
+    Object.keys(context).length === 0 ? kwargs : { ...kwargs, context },
   ])
+}
+
+const LANG_CACHE_TTL_MS = 10 * 60 * 1000
+/** Survives between requests while the function instance stays warm. */
+const langCache = new Map<string, { lang: string | null; expiresAt: number }>()
+
+/** The user's interface language ("fr_FR"); null when it can't be read. */
+async function readUserLang(session: OdooSession): Promise<string | null> {
+  const { url, db } = session.connection
+  const key = `${url}|${db}|${session.uid}`
+  const cached = langCache.get(key)
+  if (cached !== undefined && cached.expiresAt > Date.now()) {
+    return cached.lang
+  }
+  let lang: string | null = null
+  try {
+    const records = await executeKw(
+      session,
+      "res.users",
+      "read",
+      [[session.uid]],
+      { fields: ["lang"] }
+    )
+    const record = Array.isArray(records) ? records[0] : undefined
+    lang =
+      isRecord(record) && typeof record.lang === "string" && record.lang !== ""
+        ? record.lang
+        : null
+  } catch (error) {
+    // The language only affects names: Odoo's default ones still work.
+    if (!(error instanceof OdooRpcError)) {
+      throw error
+    }
+  }
+  langCache.set(key, { lang, expiresAt: Date.now() + LANG_CACHE_TTL_MS })
+  return lang
+}
+
+/** Signs in and reads the user's language, sent with every later call. */
+async function openSession(connection: OdooConnection): Promise<OdooSession> {
+  const session = await authenticate(connection)
+  const lang = await readUserLang(session)
+  return lang === null ? session : { ...session, context: { lang } }
 }
 
 /** Authenticates at most once per instance during a request. */
@@ -186,7 +237,7 @@ export function createSessionPool(
           ? Promise.reject(
               new HttpError(`Odoo instance ${index} is not configured.`, 400)
             )
-          : authenticate(instance)
+          : openSession(instance)
       sessions.set(index, session)
     }
     return session
