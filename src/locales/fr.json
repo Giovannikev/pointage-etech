@@ -276,7 +276,21 @@
     "summaryWithTicketsByProject_other": "{{tasks}} et {{tickets}} dans {{count}} projets",
     "showTickets": "Tickets d'assistance",
     "ticketsError": "Impossible de charger vos tickets d'assistance : {{message}}",
-    "ticketsTruncated": "Seuls vos 200 tickets ouverts les plus importants par instance sont affichés."
+    "ticketsTruncated": "Seuls vos 200 tickets ouverts les plus importants par instance sont affichés.",
+    "changeStatus": "État : {{status}} (changer)",
+    "statusMenu": "Changer l'état dans Odoo",
+    "statusChanged": "État passé à {{status}}",
+    "statusError": "Impossible de changer l'état dans Odoo",
+    "cardActions": "Actions pour {{name}}",
+    "moveTo": "Déplacer vers",
+    "noMoveTarget": "Aucune autre étape dans ce projet",
+    "moved": "Déplacée vers {{stage}}",
+    "movedHidden": "L'étape est repliée : la tâche rejoint les tâches clôturées.",
+    "moveError": "Impossible de déplacer la tâche dans Odoo",
+    "moving": "Enregistrement dans Odoo",
+    "undo": "Annuler",
+    "dropHere": "Déposer pour déplacer la tâche vers {{stage}}",
+    "noDropHint": "Ce projet n'a pas d'étape de ce nom"
   },
   "quickLog": {
     "title": "Pointer du temps",

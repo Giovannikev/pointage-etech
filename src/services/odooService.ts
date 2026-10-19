@@ -33,6 +33,7 @@ import type {
   TimesheetLookup,
   TimesheetReference,
   TimesheetSubmission,
+  UpdateTaskRequest,
 } from "@/types/timesheet"
 import { isPositiveInteger, isRecord } from "@/utils/guards"
 
@@ -368,6 +369,10 @@ function toMyTasksResult(value: unknown): MyTasksInstanceResult {
   return toInstanceResult(value, (record) => ({
     tasks: readList(record.tasks, toKanbanTask),
     stages: readList(record.stages, toKanbanStage),
+    // Older gateways don't say which states can be set.
+    statusOptions: Array.isArray(record.statusOptions)
+      ? record.statusOptions.filter(isKanbanStatus)
+      : [],
     truncated: record.truncated === true,
   }))
 }
@@ -390,6 +395,28 @@ export function fetchMyTasks(
 /** The cached tasks, if fresh: lets a page render without a loading state. */
 export function peekMyTasks(): MyTasksInstanceResult[] | undefined {
   return odooCache.peek(MY_TASKS_KEY)
+}
+
+/**
+ * Moves a task to another stage and/or sets its state in Odoo; resolves
+ * with the task as Odoo holds it afterwards. Rejects with Odoo's message
+ * (access rights, a stage of another project...).
+ */
+export async function updateTask(
+  change: Omit<UpdateTaskRequest, "action">
+): Promise<KanbanTask> {
+  try {
+    const data = await invokeGateway({ action: "UPDATE_TASK", ...change })
+    if (isRecord(data)) {
+      return toKanbanTask(data.task)
+    }
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  } finally {
+    // Every list showing tasks may hold the old stage or state.
+    odooCache.invalidate(MY_TASKS_KEY.id)
+    odooCache.invalidate(TASK_SEARCH_PREFIX)
+    odooCache.invalidate(PROJECT_TASKS_PREFIX)
+  }
 }
 
 /* ------------------------------------------------------------------ */

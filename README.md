@@ -107,12 +107,16 @@ The dashboard editor works on one function at a time and can't import
 Build them with:
 
 ```bash
-cd supabase/functions
+mkdir -p dist-functions
 for fn in user-settings github-commits odoo-gateway; do
-  npx esbuild@0.25 "$fn/index.ts" --bundle --format=esm --platform=neutral \
-    --target=es2022 --external:'npm:*' --outfile="../../dist-functions/$fn.ts"
+  python3 scripts/bundle-functions.py "$fn" > "dist-functions/$fn.ts"
 done
 ```
+
+Each build inlines the `_shared` modules the function uses, with their
+types, so the dashboard editor type-checks it without false errors. Paste
+the whole file from `dist-functions/`, never `supabase/functions/<fn>/index.ts`:
+its `../_shared` imports don't exist in the editor.
 
 The builds land in `dist-functions/`, which isn't meant to be committed. The
 sources in `supabase/functions` stay the reference: rebuild and paste again

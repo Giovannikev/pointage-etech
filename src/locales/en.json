@@ -276,7 +276,21 @@
     "summaryWithTicketsByProject_other": "{{tasks}} and {{tickets}} in {{count}} projects",
     "showTickets": "Helpdesk tickets",
     "ticketsError": "Couldn't load your helpdesk tickets: {{message}}",
-    "ticketsTruncated": "Only your 200 most important open tickets per instance are shown."
+    "ticketsTruncated": "Only your 200 most important open tickets per instance are shown.",
+    "changeStatus": "State: {{status}} (change)",
+    "statusMenu": "Set the state in Odoo",
+    "statusChanged": "State set to {{status}}",
+    "statusError": "Couldn't change the state in Odoo",
+    "cardActions": "Actions for {{name}}",
+    "moveTo": "Move to",
+    "noMoveTarget": "No other stage in this project",
+    "moved": "Moved to {{stage}}",
+    "movedHidden": "The stage is folded: the task is now among the closed tasks.",
+    "moveError": "Couldn't move the task in Odoo",
+    "moving": "Saving in Odoo",
+    "undo": "Undo",
+    "dropHere": "Drop to move the task to {{stage}}",
+    "noDropHint": "This project has no stage with this name"
   },
   "quickLog": {
     "title": "Log time",

@@ -18,6 +18,7 @@
  *   { action: "LOG_TICKET_TIME", instanceIndex, ticketId, hours, description, date }
  *   { action: "LIST_PROJECTS", instanceIndex }
  *   { action: "LIST_PROJECT_TASKS", instanceIndex, projectId, query? }
+ *   { action: "UPDATE_TASK", instanceIndex, taskId, stageId?, status? }
  */
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
@@ -88,6 +89,12 @@ interface LoggedTimesheet extends TimesheetLookup {
 interface TaskReference {
   instanceIndex: InstanceIndex
   taskId: number
+}
+
+/** A change made from the Kanban board: a new stage, a new state, or both. */
+interface TaskUpdate extends TaskReference {
+  stageId: number | null
+  status: KanbanTaskStatus | null
 }
 
 interface TaskDetails {
@@ -217,6 +224,8 @@ type InstanceResult<T> =
 type MyTasksResult = InstanceResult<{
   tasks: KanbanTask[]
   stages: KanbanStage[]
+  /** States a task can be set to on this instance (UPDATE_TASK). */
+  statusOptions: KanbanTaskStatus[]
   /** True when the task limit was reached and older tasks were left out. */
   truncated: boolean
 }>
@@ -272,6 +281,7 @@ type GatewayRequest =
   | ({ action: "LOG_TICKET_TIME" } & TicketTimeEntry)
   | { action: "LIST_PROJECTS"; instanceIndex: InstanceIndex }
   | ({ action: "LIST_PROJECT_TASKS" } & ProjectTaskQuery)
+  | ({ action: "UPDATE_TASK" } & TaskUpdate)
 
 /* ------------------------------------------------------------------ */
 /* Request validation                                                  */
@@ -478,6 +488,33 @@ function parseRequest(body: unknown): GatewayRequest {
     }
   }
 
+  if (body.action === "UPDATE_TASK") {
+    if (
+      !isInstanceIndex(body.instanceIndex) ||
+      !isPositiveInteger(body.taskId)
+    ) {
+      throw new HttpError('"instanceIndex" and "taskId" are required.', 400)
+    }
+    const stageId = body.stageId ?? null
+    const status = body.status ?? null
+    if (stageId !== null && !isPositiveInteger(stageId)) {
+      throw new HttpError('"stageId" must be a stage id.', 400)
+    }
+    if (status !== null && !isKanbanTaskStatus(status)) {
+      throw new HttpError('"status" is not a known task state.', 400)
+    }
+    if (stageId === null && status === null) {
+      throw new HttpError('Send "stageId", "status" or both.', 400)
+    }
+    return {
+      action: "UPDATE_TASK",
+      instanceIndex: body.instanceIndex,
+      taskId: body.taskId,
+      stageId,
+      status,
+    }
+  }
+
   if (body.action === "FIND_TIMESHEETS") {
     const lookups = readBatch(
       body.lookups,
@@ -585,7 +622,7 @@ function parseRequest(body: unknown): GatewayRequest {
   }
 
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS" or "LIST_PROJECT_TASKS".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS" or "UPDATE_TASK".',
     400
   )
 }
@@ -1147,6 +1184,55 @@ const STATE_STATUSES: Readonly<Record<string, KanbanTaskStatus>> = {
   "1_canceled": "canceled",
 }
 
+/**
+ * The value each state is written as, per status field. Only states a user
+ * can pick in Odoo are listed: "waiting" (Odoo 17+) is computed from the
+ * blocking tasks, so it can't be set.
+ */
+const STATUS_VALUES: Readonly<
+  Record<
+    NonNullable<TaskFieldSupport["statusField"]>,
+    Partial<Record<KanbanTaskStatus, string>>
+  >
+> = {
+  kanban_state: {
+    in_progress: "normal",
+    blocked: "blocked",
+    approved: "done",
+  },
+  state: {
+    in_progress: "01_in_progress",
+    changes_requested: "02_changes_requested",
+    approved: "03_approved",
+    done: "1_done",
+    canceled: "1_canceled",
+  },
+}
+
+const KANBAN_TASK_STATUSES: readonly KanbanTaskStatus[] = [
+  "in_progress",
+  "changes_requested",
+  "approved",
+  "done",
+  "canceled",
+  "waiting",
+  "blocked",
+]
+
+function isKanbanTaskStatus(value: unknown): value is KanbanTaskStatus {
+  return KANBAN_TASK_STATUSES.some((status) => status === value)
+}
+
+function statusOptions(
+  field: TaskFieldSupport["statusField"]
+): KanbanTaskStatus[] {
+  return field === null
+    ? []
+    : KANBAN_TASK_STATUSES.filter(
+        (status) => STATUS_VALUES[field][status] !== undefined
+      )
+}
+
 function readTaskStatus(
   value: unknown,
   field: TaskFieldSupport["statusField"]
@@ -1253,7 +1339,12 @@ async function readStages(
 async function readMyTasks(
   session: OdooSession,
   instanceIndex: InstanceIndex
-): Promise<{ tasks: KanbanTask[]; stages: KanbanStage[]; truncated: boolean }> {
+): Promise<{
+  tasks: KanbanTask[]
+  stages: KanbanStage[]
+  statusOptions: KanbanTaskStatus[]
+  truncated: boolean
+}> {
   const support = await detectTaskFields(session)
   const records = await executeKw(
     session,
@@ -1271,7 +1362,12 @@ async function readMyTasks(
     (record) => readKanbanTask(record, instanceIndex, support) ?? []
   )
   const stages = await readStages(session, instanceIndex, tasks)
-  return { tasks, stages, truncated: rawTasks.length >= MY_TASKS_LIMIT }
+  return {
+    tasks,
+    stages,
+    statusOptions: statusOptions(support.statusField),
+    truncated: rawTasks.length >= MY_TASKS_LIMIT,
+  }
 }
 
 function getMyTasks(
@@ -1752,6 +1848,102 @@ async function logTicketTime(
 }
 
 /* ------------------------------------------------------------------ */
+/* UPDATE_TASK (Kanban drag and drop, state menu)                      */
+/* ------------------------------------------------------------------ */
+
+/** Reads one task as the board shows it. */
+async function readOneTask(
+  session: OdooSession,
+  instanceIndex: InstanceIndex,
+  taskId: number,
+  support: TaskFieldSupport
+): Promise<KanbanTask> {
+  const records = await executeKw(session, "project.task", "read", [[taskId]], {
+    fields: support.fields,
+  })
+  const task = readKanbanTask(
+    Array.isArray(records) ? records[0] : undefined,
+    instanceIndex,
+    support
+  )
+  if (task === null) {
+    throw new HttpError("This task can't be read in Odoo.", 404)
+  }
+  return task
+}
+
+/**
+ * The new stage must be one of the task's project: stages are shared
+ * records, and a stage of another project would hide the task from its
+ * project's pipeline.
+ */
+async function requireProjectStage(
+  session: OdooSession,
+  task: KanbanTask,
+  stageId: number
+): Promise<void> {
+  const records = await executeKw(
+    session,
+    "project.task.type",
+    "read",
+    [[stageId]],
+    { fields: ["name", "project_ids"] }
+  )
+  const stage = Array.isArray(records) ? records[0] : undefined
+  if (!isRecord(stage) || typeof stage.name !== "string") {
+    throw new HttpError("This stage doesn't exist in Odoo anymore.", 404)
+  }
+  const projectIds = Array.isArray(stage.project_ids) ? stage.project_ids : []
+  if (task.projectId === null || !projectIds.includes(task.projectId)) {
+    throw new HttpError(
+      `The stage "${stage.name}" isn't used by the project of this task.`,
+      409
+    )
+  }
+}
+
+/**
+ * Moves a task to another stage and/or sets its state, with the user's own
+ * Odoo rights, then reads it again: Odoo may change other fields on the way
+ * (moving a task resets its state on most versions).
+ */
+async function updateTask(
+  instances: OdooInstanceSettings[],
+  { instanceIndex, taskId, stageId, status }: TaskUpdate
+): Promise<KanbanTask> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  const support = await detectTaskFields(session)
+  const current = await readOneTask(session, instanceIndex, taskId, support)
+
+  const values: Record<string, unknown> = {}
+  if (stageId !== null && stageId !== current.stageId) {
+    await requireProjectStage(session, current, stageId)
+    values.stage_id = stageId
+  }
+  if (status !== null) {
+    const value =
+      support.statusField === null
+        ? undefined
+        : STATUS_VALUES[support.statusField][status]
+    if (support.statusField === null || value === undefined) {
+      throw new HttpError(
+        `${session.connection.label} doesn't let tasks be set to "${status}".`,
+        409
+      )
+    }
+    values[support.statusField] = value
+  }
+  if (Object.keys(values).length === 0) {
+    return current
+  }
+
+  await asConflict(
+    executeKw(session, "project.task", "write", [[taskId], values])
+  )
+  return await readOneTask(session, instanceIndex, taskId, support)
+}
+
+/* ------------------------------------------------------------------ */
 /* LIST_PROJECTS / LIST_PROJECT_TASKS (manual task picker)             */
 /* ------------------------------------------------------------------ */
 
@@ -1891,6 +2083,8 @@ serveJson("odoo-gateway", {
         return await listProjects(instances, gatewayRequest.instanceIndex)
       case "LIST_PROJECT_TASKS":
         return await listProjectTasks(instances, gatewayRequest)
+      case "UPDATE_TASK":
+        return { task: await updateTask(instances, gatewayRequest) }
     }
   },
 })

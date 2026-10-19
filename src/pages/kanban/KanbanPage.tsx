@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArchiveIcon,
   Columns3Icon,
@@ -10,7 +10,8 @@ import {
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
-import { KanbanColumn } from "@/components/kanban/KanbanColumn"
+import type { CardEditing } from "@/components/kanban/KanbanCard"
+import { KanbanColumn, type ColumnDrop } from "@/components/kanban/KanbanColumn"
 import { ProjectFilter } from "@/components/kanban/ProjectFilter"
 import {
   QuickLogDialog,
@@ -55,9 +56,12 @@ import {
   peekMyTasks,
   peekTickets,
   searchTickets,
+  updateTask,
 } from "@/services/odooService"
 import type {
+  KanbanStage,
   KanbanTask,
+  KanbanTaskStatus,
   MyTasksInstanceResult,
   OdooTaskMatch,
   TicketsInstanceResult,
@@ -65,8 +69,16 @@ import type {
 import {
   buildBoard,
   countClosedTasks,
+  findColumnStage,
+  isClosedTask,
+  listMoveTargets,
   listProjects,
   listTickets,
+  moveToStage,
+  replaceTask,
+  statusOptionsOf,
+  taskKey,
+  type BoardColumn,
   type BoardGrouping,
 } from "@/utils/kanban"
 import {
@@ -277,6 +289,146 @@ function KanbanWorkspace() {
     })
   }, [])
 
+  /* ---- Editing: stage (drag and drop, menu) and state (badge) ---- */
+
+  const { mutate: mutateTasks } = tasksQuery
+  /** Tasks whose change is being saved in Odoo, by taskKey(). */
+  const [saving, setSaving] = useState<ReadonlySet<string>>(() => new Set())
+  /** The card being dragged, while it is. */
+  const [dragged, setDragged] = useState<KanbanTask | null>(null)
+
+  const setSavingFor = useCallback((key: string, isSaving: boolean): void => {
+    setSaving((current) => {
+      const next = new Set(current)
+      if (isSaving) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }, [])
+
+  /**
+   * Shows the change at once, saves it in Odoo, then shows the task as Odoo
+   * holds it (moving may reset its state); on failure, puts it back.
+   */
+  const saveTask = useCallback(
+    async (
+      before: KanbanTask,
+      optimistic: KanbanTask,
+      change: { stageId?: number; status?: KanbanTaskStatus }
+    ): Promise<KanbanTask> => {
+      const key = taskKey(before)
+      setSavingFor(key, true)
+      mutateTasks((results) => replaceTask(results, optimistic))
+      try {
+        const saved = await updateTask({
+          instanceIndex: before.instanceIndex,
+          taskId: before.taskId,
+          ...change,
+        })
+        mutateTasks((results) => replaceTask(results, saved))
+        return saved
+      } catch (error) {
+        mutateTasks((results) => replaceTask(results, before))
+        throw error
+      } finally {
+        setSavingFor(key, false)
+      }
+    },
+    [mutateTasks, setSavingFor]
+  )
+
+  /** The latest moveTask, for the "Undo" button of a move's notification. */
+  const moveTaskRef = useRef<
+    ((task: KanbanTask, stage: KanbanStage) => Promise<void>) | null
+  >(null)
+
+  const moveTask = useCallback(
+    async (task: KanbanTask, stage: KanbanStage): Promise<void> => {
+      const previous =
+        data === undefined
+          ? undefined
+          : listMoveTargets(data, moveToStage(task, stage)).find(
+              (candidate) => candidate.stageId === task.stageId
+            )
+      try {
+        const saved = await saveTask(task, moveToStage(task, stage), {
+          stageId: stage.stageId,
+        })
+        const isHidden = !showClosed && isClosedTask(saved, stage)
+        toast.success(t("kanban.moved", { stage: stage.name }), {
+          description: isHidden
+            ? `${task.name} — ${t("kanban.movedHidden")}`
+            : task.name,
+          action:
+            previous === undefined
+              ? undefined
+              : {
+                  label: t("kanban.undo"),
+                  onClick: () => void moveTaskRef.current?.(saved, previous),
+                },
+        })
+      } catch (error) {
+        toast.error(t("kanban.moveError"), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
+    [data, saveTask, showClosed, t]
+  )
+
+  useEffect(() => {
+    moveTaskRef.current = moveTask
+  }, [moveTask])
+
+  const changeStatus = useCallback(
+    async (task: KanbanTask, status: KanbanTaskStatus): Promise<void> => {
+      try {
+        const saved = await saveTask(task, { ...task, status }, { status })
+        const label = t(`kanban.status.${saved.status ?? "in_progress"}`)
+        toast.success(t("kanban.statusChanged", { status: label }), {
+          description: task.name,
+        })
+      } catch (error) {
+        toast.error(t("kanban.statusError"), {
+          description: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
+    [saveTask, t]
+  )
+
+  const cardEditing = useCallback(
+    (task: KanbanTask): CardEditing => ({
+      statusOptions: statusOptionsOf(data, task.instanceIndex),
+      getMoveTargets: (current) =>
+        data === undefined ? [] : listMoveTargets(data, current),
+      isSaving: saving.has(taskKey(task)),
+      // Dropping changes the stage: only columns that are stages accept it.
+      isDraggable: groupBy === "stage" && task.projectId !== null,
+      onChangeStatus: (current, status) => void changeStatus(current, status),
+      onMove: (current, stage) => void moveTask(current, stage),
+      onDragStart: setDragged,
+      onDragEnd: () => setDragged(null),
+    }),
+    [data, saving, groupBy, changeStatus, moveTask]
+  )
+
+  const columnDrop = (column: BoardColumn): ColumnDrop | undefined => {
+    if (dragged === null || data === undefined) return undefined
+    const draggedKey = taskKey(dragged)
+    return {
+      stage: findColumnStage(data, dragged, column.key),
+      isSource: column.cards.some(
+        (card) => card.kind === "task" && taskKey(card.task) === draggedKey
+      ),
+      onDrop: (stage) => {
+        const task = dragged
+        setDragged(null)
+        void moveTask(task, stage)
+      },
+    }
+  }
+
   const handleLogged = ({ target, hours, date }: QuickLogResult): void => {
     quickLog.close()
     toast.success(
@@ -365,6 +517,8 @@ function KanbanWorkspace() {
               onToggleCollapsed={toggleColumn}
               onOpenTask={(task) => taskDetails.open(toTaskMatch(task))}
               onLogTime={quickLog.open}
+              cardEditing={cardEditing}
+              drop={columnDrop(column)}
             />
           ))}
         </div>

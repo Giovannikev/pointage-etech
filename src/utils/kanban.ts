@@ -2,6 +2,7 @@ import type {
   HelpdeskTicket,
   KanbanStage,
   KanbanTask,
+  KanbanTaskStatus,
   MyTasksInstanceResult,
   OdooInstanceIndex,
   TicketsInstanceResult,
@@ -438,4 +439,96 @@ export function hoursProgress(task: KanbanTask): number | null {
     return null
   }
   return Math.min(1, task.effectiveHours / task.plannedHours)
+}
+
+/* ---- Editing from the board ---------------------------------------- */
+
+/** Unique across instances. */
+export function taskKey(
+  task: Pick<KanbanTask, "instanceIndex" | "taskId">
+): string {
+  return `${task.instanceIndex}:${task.taskId}`
+}
+
+function compareStages(a: KanbanStage, b: KanbanStage): number {
+  return a.sequence - b.sequence || a.stageId - b.stageId
+}
+
+/**
+ * The stages the task can move to: those of its project, in its instance,
+ * in Odoo's order, without the one it is in. Empty for a task without a
+ * project, or when the gateway doesn't send the stages' projects.
+ */
+export function listMoveTargets(
+  results: MyTasksInstanceResult[],
+  task: KanbanTask
+): KanbanStage[] {
+  const { projectId } = task
+  if (projectId === null) {
+    return []
+  }
+  const result = results.find(
+    (candidate) => candidate.instanceIndex === task.instanceIndex
+  )
+  if (result === undefined || !result.ok) {
+    return []
+  }
+  return result.stages
+    .filter(
+      (stage) =>
+        stage.stageId !== task.stageId && stage.projectIds.includes(projectId)
+    )
+    .sort(compareStages)
+}
+
+/**
+ * The stage of the task's project behind a stage column. Columns merge the
+ * stages of every project by name, so the column "Test interne" is a
+ * different stage record in each project. null when the project has no
+ * stage of that name: the task can't be dropped there.
+ */
+export function findColumnStage(
+  results: MyTasksInstanceResult[],
+  task: KanbanTask,
+  columnKey: string
+): KanbanStage | null {
+  return (
+    listMoveTargets(results, task).find(
+      (stage) => normalizeText(stage.name) === columnKey
+    ) ?? null
+  )
+}
+
+/** The states a task of the instance can be set to. */
+export function statusOptionsOf(
+  results: MyTasksInstanceResult[] | undefined,
+  instanceIndex: OdooInstanceIndex
+): KanbanTaskStatus[] {
+  const result = results?.find(
+    (candidate) => candidate.instanceIndex === instanceIndex
+  )
+  return result !== undefined && result.ok ? result.statusOptions : []
+}
+
+/** The results with this task replaced (matched by instance and id). */
+export function replaceTask(
+  results: MyTasksInstanceResult[],
+  task: KanbanTask
+): MyTasksInstanceResult[] {
+  const key = taskKey(task)
+  return results.map((result) =>
+    result.ok && result.instanceIndex === task.instanceIndex
+      ? {
+          ...result,
+          tasks: result.tasks.map((candidate) =>
+            taskKey(candidate) === key ? task : candidate
+          ),
+        }
+      : result
+  )
+}
+
+/** The task as it will look in the stage, before Odoo answers. */
+export function moveToStage(task: KanbanTask, stage: KanbanStage): KanbanTask {
+  return { ...task, stageId: stage.stageId, stageName: stage.name }
 }

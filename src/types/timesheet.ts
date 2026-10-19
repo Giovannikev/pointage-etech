@@ -248,6 +248,11 @@ export type InstanceResult<T> =
 export type MyTasksInstanceResult = InstanceResult<{
   tasks: KanbanTask[]
   stages: KanbanStage[]
+  /**
+   * States a task can be set to on this instance: they differ between Odoo
+   * versions. Empty when the instance (or an older gateway) has none.
+   */
+  statusOptions: KanbanTaskStatus[]
   /** True when the task limit was reached and older tasks were left out. */
   truncated: boolean
 }>
@@ -421,6 +426,22 @@ export interface ListProjectTasksResponse {
   truncated: boolean
 }
 
+/* ---- Kanban edits ------------------------------------------------ */
+
+/** Moves a task to another stage of its project and/or sets its state. */
+export interface UpdateTaskRequest {
+  action: "UPDATE_TASK"
+  instanceIndex: OdooInstanceIndex
+  taskId: number
+  stageId?: number
+  status?: KanbanTaskStatus
+}
+
+export interface UpdateTaskResponse {
+  /** The task as Odoo holds it after the change. */
+  task: KanbanTask
+}
+
 export type GatewayRequest =
   | SearchTaskRequest
   | SubmitTimesheetRequest
@@ -435,6 +456,7 @@ export type GatewayRequest =
   | LogTicketTimeRequest
   | ListProjectsRequest
   | ListProjectTasksRequest
+  | UpdateTaskRequest
 
 /* ------------------------------------------------------------------ */
 /* github-commits Edge Function contract                               */

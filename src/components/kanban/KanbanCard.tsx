@@ -1,9 +1,26 @@
-import { CalendarClockIcon, StarIcon, TimerIcon } from "lucide-react"
+import { useState } from "react"
+import {
+  CalendarClockIcon,
+  EllipsisVerticalIcon,
+  Loader2Icon,
+  StarIcon,
+  TimerIcon,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { TaskStatusBadge } from "@/components/kanban/TaskStatusBadge"
+import {
+  TaskStatusBadge,
+  TaskStatusMenu,
+} from "@/components/kanban/TaskStatusBadge"
 import { InstanceBadge } from "@/components/timesheet/InstanceBadge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Tooltip,
   TooltipContent,
@@ -11,7 +28,12 @@ import {
 } from "@/components/ui/tooltip"
 import { useFormatters } from "@/hooks/useFormatters"
 import { cn } from "@/lib/utils"
-import type { KanbanTask, OdooInstanceIndex } from "@/types/timesheet"
+import type {
+  KanbanStage,
+  KanbanTask,
+  KanbanTaskStatus,
+  OdooInstanceIndex,
+} from "@/types/timesheet"
 import { toLocalIsoDate, todayIsoDate } from "@/utils/date"
 import { hoursProgress, splitTaskName } from "@/utils/kanban"
 
@@ -21,6 +43,22 @@ const INSTANCE_EDGES: Record<OdooInstanceIndex, string> = {
   2: "border-l-instance-2",
 }
 
+/** What the board lets the user change on a card, written to Odoo. */
+export interface CardEditing {
+  /** States the task's instance accepts. */
+  statusOptions: KanbanTaskStatus[]
+  /** Stages of the task's project it can move to; read when the menu opens. */
+  getMoveTargets: (task: KanbanTask) => KanbanStage[]
+  /** A change of this task is being saved: the card waits for Odoo. */
+  isSaving: boolean
+  /** The card can be dragged onto another stage column. */
+  isDraggable: boolean
+  onChangeStatus: (task: KanbanTask, status: KanbanTaskStatus) => void
+  onMove: (task: KanbanTask, stage: KanbanStage) => void
+  onDragStart: (task: KanbanTask) => void
+  onDragEnd: () => void
+}
+
 interface KanbanCardProps {
   task: KanbanTask
   showInstance: boolean
@@ -28,6 +66,56 @@ interface KanbanCardProps {
   context: "project" | "stage"
   onOpenTask: (task: KanbanTask) => void
   onLogTime: (task: KanbanTask) => void
+  /** Without it, the card is read only (Tasks page). */
+  editing?: CardEditing
+}
+
+/** "Move to" menu: the keyboard and touch way to change the stage. */
+function MoveMenu({
+  task,
+  editing,
+}: {
+  task: KanbanTask
+  editing: CardEditing
+}) {
+  const { t } = useTranslation()
+  const [targets, setTargets] = useState<KanbanStage[]>([])
+
+  return (
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) setTargets(editing.getMoveTargets(task))
+      }}
+    >
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="shrink-0 text-muted-foreground"
+          disabled={editing.isSaving}
+          aria-label={t("kanban.cardActions", { name: task.name })}
+        >
+          <EllipsisVerticalIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-80 min-w-52">
+        <DropdownMenuLabel>{t("kanban.moveTo")}</DropdownMenuLabel>
+        {targets.map((stage) => (
+          <DropdownMenuItem
+            key={stage.stageId}
+            onSelect={() => editing.onMove(task, stage)}
+          >
+            {stage.name}
+          </DropdownMenuItem>
+        ))}
+        {targets.length === 0 && (
+          <DropdownMenuItem disabled>
+            {t("kanban.noMoveTarget")}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 function TaskHours({ task }: { task: KanbanTask }) {
@@ -79,6 +167,7 @@ export function KanbanCard({
   context,
   onOpenTask,
   onLogTime,
+  editing,
 }: KanbanCardProps) {
   const { t } = useTranslation()
   const { formatShortDate } = useFormatters()
@@ -88,13 +177,34 @@ export function KanbanCard({
   const canLog = task.projectId !== null
   const detail = context === "project" ? task.projectName : task.stageName
 
+  const isDraggable =
+    editing !== undefined && editing.isDraggable && !editing.isSaving
+  const [isDragged, setIsDragged] = useState(false)
+
   return (
     <article
       className={cn(
-        "grid gap-2 rounded-lg border border-l-[3px] bg-card p-3 shadow-xs",
-        INSTANCE_EDGES[task.instanceIndex]
+        "grid gap-2 rounded-lg border border-l-[3px] bg-card p-3 shadow-xs transition-opacity",
+        INSTANCE_EDGES[task.instanceIndex],
+        isDraggable && "cursor-grab active:cursor-grabbing",
+        isDragged && "opacity-40",
+        editing?.isSaving && "opacity-70"
       )}
       aria-label={task.name}
+      aria-busy={editing?.isSaving}
+      draggable={isDraggable}
+      onDragStart={(event) => {
+        if (!isDraggable) return
+        event.dataTransfer.effectAllowed = "move"
+        // Some browsers only start a drag that carries data.
+        event.dataTransfer.setData("text/plain", task.name)
+        setIsDragged(true)
+        editing.onDragStart(task)
+      }}
+      onDragEnd={() => {
+        setIsDragged(false)
+        editing?.onDragEnd()
+      }}
     >
       <div className="flex min-w-0 items-center gap-2">
         {ref !== null && (
@@ -108,10 +218,30 @@ export function KanbanCard({
             aria-label={t("kanban.starred")}
           />
         )}
-        <TaskStatusBadge status={task.status} />
-        {showInstance && (
-          <span className="ml-auto min-w-0">
-            <InstanceBadge instanceIndex={task.instanceIndex} />
+        {editing === undefined ? (
+          <TaskStatusBadge status={task.status} />
+        ) : (
+          <TaskStatusMenu
+            status={task.status}
+            options={editing.statusOptions}
+            disabled={editing.isSaving}
+            onChange={(status) => editing.onChangeStatus(task, status)}
+          />
+        )}
+        {editing?.isSaving && (
+          <Loader2Icon
+            className="size-3.5 shrink-0 animate-spin text-muted-foreground"
+            aria-label={t("kanban.moving")}
+          />
+        )}
+        {(showInstance || editing !== undefined) && (
+          <span className="ml-auto flex min-w-0 items-center gap-1">
+            {showInstance && (
+              <InstanceBadge instanceIndex={task.instanceIndex} />
+            )}
+            {editing !== undefined && task.projectId !== null && (
+              <MoveMenu task={task} editing={editing} />
+            )}
           </span>
         )}
       </div>

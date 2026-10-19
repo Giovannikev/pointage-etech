@@ -24,11 +24,22 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-function fromBase64(value: string): Uint8Array<ArrayBuffer> {
-  return Uint8Array.from(atob(value), (char) => char.charCodeAt(0))
+/**
+ * Bytes backed by a plain ArrayBuffer, as Web Crypto expects. The return
+ * type is inferred, not written: Uint8Array<ArrayBuffer> on TypeScript 5.7+
+ * (Deno 2.2+), plain Uint8Array on older versions such as the dashboard
+ * editor's, which reject the generic form.
+ */
+function fromBase64(value: string) {
+  const binary = atob(value)
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length))
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }
 
-function decodeKey(encoded: string): Uint8Array<ArrayBuffer> | null {
+function decodeKey(encoded: string): ReturnType<typeof fromBase64> | null {
   try {
     return fromBase64(encoded)
   } catch {

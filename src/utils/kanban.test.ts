@@ -10,6 +10,11 @@ import {
   buildBoard,
   cardKey,
   countClosedTasks,
+  findColumnStage,
+  listMoveTargets,
+  moveToStage,
+  replaceTask,
+  statusOptionsOf,
   listProjects,
   listTickets,
   matchesTaskSearch,
@@ -23,6 +28,7 @@ const results: MyTasksInstanceResult[] = [
     instanceIndex: 1,
     ok: true,
     truncated: false,
+    statusOptions: [],
     stages: [
       {
         instanceIndex: 1,
@@ -56,6 +62,7 @@ const results: MyTasksInstanceResult[] = [
     instanceIndex: 2,
     ok: true,
     truncated: false,
+    statusOptions: [],
     stages: [
       {
         instanceIndex: 2,
@@ -326,6 +333,7 @@ describe("buildBoard with the stages of picked projects", () => {
       instanceIndex: 1,
       ok: true,
       truncated: false,
+      statusOptions: [],
       stages: [
         stage(1, "A reviser", 1),
         stage(2, "Backlog", 2),
@@ -379,5 +387,88 @@ describe("buildBoard with the stages of picked projects", () => {
         filters({ projects: new Set(["1:10"]), query: "seuil" })
       ).map((column) => column.name)
     ).toEqual(["Test interne"])
+  })
+})
+
+describe("editing from the board", () => {
+  const stage = (
+    stageId: number,
+    name: string,
+    sequence: number,
+    projectIds: number[]
+  ) => ({
+    instanceIndex: 1 as const,
+    stageId,
+    name,
+    sequence,
+    folded: false,
+    projectIds,
+  })
+
+  // Two projects with their own "Test interne" stage, and a shared Backlog.
+  const task = kanbanTask({ taskId: 308, projectId: 10, stageId: 2 })
+  const board: MyTasksInstanceResult[] = [
+    {
+      instanceIndex: 1,
+      ok: true,
+      truncated: false,
+      statusOptions: ["in_progress", "blocked", "approved"],
+      stages: [
+        stage(3, "Test interne", 4, [10]),
+        stage(1, "Backlog", 1, [10, 20]),
+        stage(2, "En cours", 2, [10]),
+        stage(9, "Test interne", 4, [20]),
+        stage(5, "Corrections", 6, [20]),
+      ],
+      tasks: [task, kanbanTask({ taskId: 1, projectId: 20, stageId: 1 })],
+    },
+    { instanceIndex: 2, ok: false, error: "unreachable" },
+  ]
+
+  it("lists the other stages of the task's project, in Odoo's order", () => {
+    expect(listMoveTargets(board, task).map((s) => s.stageId)).toEqual([1, 3])
+  })
+
+  it("finds the stage of the task's own project behind a merged column", () => {
+    expect(findColumnStage(board, task, "test interne")?.stageId).toBe(3)
+    const other = kanbanTask({ taskId: 1, projectId: 20, stageId: 1 })
+    expect(findColumnStage(board, other, "test interne")?.stageId).toBe(9)
+  })
+
+  it("refuses columns the project has no stage for, and its own column", () => {
+    expect(findColumnStage(board, task, "corrections")).toBeNull()
+    expect(findColumnStage(board, task, "en cours")).toBeNull()
+  })
+
+  it("can't move tasks without a project or stages from an older gateway", () => {
+    expect(listMoveTargets(board, kanbanTask({ projectId: null }))).toEqual([])
+    const old = board.map((result) =>
+      result.ok
+        ? {
+            ...result,
+            stages: result.stages.map((s) => ({ ...s, projectIds: [] })),
+          }
+        : result
+    )
+    expect(listMoveTargets(old, task)).toEqual([])
+  })
+
+  it("reads the states an instance accepts", () => {
+    expect(statusOptionsOf(board, 1)).toEqual([
+      "in_progress",
+      "blocked",
+      "approved",
+    ])
+    expect(statusOptionsOf(board, 2)).toEqual([])
+    expect(statusOptionsOf(undefined, 1)).toEqual([])
+  })
+
+  it("replaces only the moved task, so the board follows it", () => {
+    const moved = moveToStage(task, stage(3, "Test interne", 4, [10]))
+    const next = replaceTask(board, moved)
+    const columns = buildBoard(next, filters())
+    const column = columns.find((c) => c.name === "Test interne")
+    expect(taskIds([column!])).toEqual([308])
+    expect(next[1]).toBe(board[1])
   })
 })
