@@ -39,10 +39,20 @@ export function normalizeText(value: string): string {
     .trim()
 }
 
-/** Every word of the query must appear in the task name or its project. */
+/** "18486" or "#18486": a record id, as Odoo is searched by id too. */
+const ID_QUERY = /^#?(\d{1,9})$/
+
+/**
+ * Every word of the query must appear in the task name or its project; a
+ * query such as "#18486" also matches the task with that id.
+ */
 export function matchesTaskSearch(task: KanbanTask, query: string): boolean {
   const words = normalizeText(query).split(/\s+/).filter(Boolean)
   if (words.length === 0) {
+    return true
+  }
+  const id = ID_QUERY.exec(query.trim())
+  if (id !== null && Number(id[1]) === task.taskId) {
     return true
   }
   const haystack = normalizeText(`${task.name} ${task.projectName ?? ""}`)
@@ -223,8 +233,8 @@ export interface ProjectOption {
   name: string | null
   /** null when the option gathers tasks of several instances (no project). */
   instanceIndex: OdooInstanceIndex | null
-  /** Tasks and tickets of the project on the board. */
-  taskCount: number
+  /** Tasks and tickets of the project on the board; null when unknown. */
+  taskCount: number | null
 }
 
 function compareNames(a: string | null, b: string | null): number {
@@ -252,7 +262,7 @@ export function listProjects(
       instanceIndex: item.projectId === null ? null : item.instanceIndex,
       taskCount: 0,
     }
-    options.set(key, { ...option, taskCount: option.taskCount + 1 })
+    options.set(key, { ...option, taskCount: (option.taskCount ?? 0) + 1 })
   }
   return [...options.values()].sort((a, b) => compareNames(a.name, b.name))
 }

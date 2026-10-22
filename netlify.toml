@@ -1,0 +1,21 @@
+# The build must run scripts/write-version.mjs (the "build" script does) so
+# the deployed version.json lets open tabs tell a new deployment is online.
+[build]
+  command = "pnpm run build"
+  publish = "dist"
+
+# The update check (src/hooks/useVersionCheck.ts) must always read the
+# deployed version.json, and browsers must always look for a new service
+# worker: neither may be cached anywhere.
+
+[[headers]]
+  for = "/version.json"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+    Pragma = "no-cache"
+    Expires = "0"
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"

@@ -273,8 +273,13 @@ it is kept as written. A description edited by hand is never regenerated.
 | `UPDATE_TIMESHEET` | `instanceIndex`, `timesheetId`, `hours`, `description` | The line as stored by Odoo |
 | `DELETE_TIMESHEET` | `instanceIndex`, `timesheetId` | The deleted line's reference |
 | `SEARCH_TASKS` | `query` (2-100 chars: name, project or `#id`), `instanceIndex?` | Any active task with a project, assigned or not (50 max per instance) |
-| `SEARCH_TICKETS` | `query`, `mine`, `instanceIndex?` | Open helpdesk tickets: the user's (`mine`) or matching the query |
+| `SEARCH_TICKETS` | `query`, `mine`, `projects?`, `assignees?`, `instanceIndex?` | Open helpdesk tickets: the user's (`mine`), or matching the query and/or the filters |
 | `LOG_TICKET_TIME` | `instanceIndex`, `ticketId`, `hours`, `description`, `date` | The created timesheet id, logged on the ticket's project |
+| `LIST_TASKS` | `query?`, `projects?`, `assignees?` (at least one), `includeClosed`, `instanceIndex?` | Any active task with a project, assigned to anyone, with its stages (500 max per instance) |
+| `LIST_ASSIGNEES` | `instanceIndex?` | The internal users of each instance, and the signed-in user's id there |
+
+Filters are keyed per instance: `projects: ["1:12"]`, `assignees: ["2:7", "none"]`
+(`none`: nobody assigned).
 
 The read actions answer per instance (`{ instanceIndex, ok, ... }`), so one
 unreachable instance doesn't hide the other. `GET_MY_TASKS` detects the task
@@ -289,8 +294,12 @@ any timesheet write clears both. Views are addressed by the URL hash:
 (`#kanban?group=project&projects=2:5`, `#history?from=2026-10-01&to=2026-10-31&view=grid`),
 so a reload or a shared link reopens the same view.
 
-The Tasks page (`#tasks`) finds any task, assigned or not, and the helpdesk
-tickets (Odoo Helpdesk app, `helpdesk.ticket`): time logged on a ticket goes
+**My tasks** (`#kanban`) shows the tasks and open tickets assigned to the
+user on a board. **All tasks** (`#tasks`) shows the same board for any task,
+assigned or not, with an assignee filter on top
+(`#tasks?assignees=1:7,2:21&projects=1:12`); it reads Odoo once an assignee,
+a project or a 2-character search narrows the tasks down. Helpdesk tickets
+(Odoo Helpdesk app, `helpdesk.ticket`) show on both: time logged on a ticket goes
 to the project of its helpdesk team, with `helpdesk_ticket_id` set, as Odoo's
 own ticket timesheets do. Instances without the Helpdesk app, or whose teams
 don't track time, are detected and shown as such.

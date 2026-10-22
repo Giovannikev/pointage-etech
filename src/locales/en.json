@@ -21,8 +21,8 @@
   },
   "nav": {
     "timesheet": "Timesheet",
-    "kanban": "Kanban",
-    "tasks": "Tasks",
+    "kanban": "My tasks",
+    "tasks": "All tasks",
     "history": "History",
     "settings": "Settings",
     "odooInstances": "Odoo instances",
@@ -385,31 +385,34 @@
     "doneHint": "Lines are estimated from the time between commits. Adjust any of them: your value will be kept."
   },
   "tasks": {
-    "title": "Tasks and tickets",
-    "subtitle": "Find any Odoo task or helpdesk ticket, assigned to you or not, and log time on it.",
-    "typeLabel": "What to search",
-    "tabTasks": "Tasks",
-    "tabTickets": "Helpdesk tickets",
-    "scopeLabel": "Which tickets",
-    "myTickets": "My open tickets",
-    "allTickets": "All open tickets",
-    "search": "Search",
-    "searchTasksPlaceholder": "Task name, reference, project or #ID",
-    "searchTicketsPlaceholder": "Ticket title, reference or #ID",
-    "searchTasksTitle": "Search any task",
-    "searchTasksHint": "Type at least 2 characters: a name (\"Daily\"), a reference (\"01-501\"), a project, or an ID (\"#18486\"). Tasks assigned to someone else are found too.",
-    "searchTicketsTitle": "Search the open tickets",
-    "searchTicketsHint": "Type at least 2 characters of a title, a reference or an ID.",
-    "loadError": "Couldn't search Odoo",
-    "noResults": "Nothing matches this search",
-    "noResultsHint": "Check the spelling, try a shorter search, or show all instances.",
-    "truncated": "Only the first 50 results per instance are shown. Refine the search to find the others.",
     "ticket": "Helpdesk ticket",
-    "ticketNotLoggable": "Time can't be logged on this ticket: its helpdesk team doesn't track timesheets, or has no project for them.",
-    "helpdeskMissing": "No Helpdesk app on your instances",
-    "helpdeskMissingHint": "Tickets appear here when the Helpdesk app is installed on one of your Odoo instances.",
-    "noOpenTickets": "No open ticket assigned to you",
-    "noOpenTicketsHint": "Switch to all open tickets to find one assigned to someone else."
+    "ticketNotLoggable": "Time can't be logged on this ticket: its helpdesk team doesn't track timesheets, or has no project for them."
+  },
+  "allTasks": {
+    "title": "All tasks",
+    "subtitle": "Any Odoo task or helpdesk ticket, assigned to you or not.",
+    "searchPlaceholder": "Task, reference, project or #ID",
+    "hintTitle": "What do you want to see?",
+    "hint": "Pick an assignee or a project, or type at least 2 characters: a name (\"Daily\"), a reference (\"01-501\"), a project or an ID (\"#18486\").",
+    "quickMine": "My tasks",
+    "quickUnassigned": "Unassigned tasks",
+    "loadError": "Couldn't load the tasks",
+    "noMatchHint": "Change the assignee or project, try another search, or show closed tasks.",
+    "truncated": "Only the 500 most important tasks per instance are shown. Add a filter to see the others.",
+    "ticketsTruncated": "Only the first 200 open tickets per instance are shown. Add a filter to see the others.",
+    "assignedTo": "Assigned to",
+    "assigneeFilter": {
+      "label": "Filter by assignee",
+      "all": "All assignees",
+      "count_one": "{{count}} assignee",
+      "count_other": "{{count}} assignees",
+      "me": "(you)",
+      "unassigned": "Unassigned",
+      "search": "Search for a person",
+      "noMatch": "Nobody matches",
+      "clear": "Clear assignees",
+      "loading": "Loading users…"
+    }
   },
   "assignTask": {
     "title": "Pick the task",
@@ -449,5 +452,11 @@
     "submitTicket": "Use this ticket",
     "assignedTicket_one": "Ticket attached to {{count}} line",
     "assignedTicket_other": "Ticket attached to {{count}} lines"
+  },
+  "update": {
+    "title": "New version available",
+    "message": "Press <keys/> to reload the page.",
+    "reloadAction": "Reload",
+    "dismiss": "Dismiss"
   }
 }

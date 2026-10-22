@@ -200,7 +200,7 @@ export type KanbanTaskStatus =
   | "waiting"
   | "blocked"
 
-/** A task assigned to the signed-in user, as shown on the Kanban board. */
+/** An Odoo task as shown on the boards (My tasks, All tasks). */
 export interface KanbanTask {
   instanceIndex: OdooInstanceIndex
   taskId: number
@@ -221,6 +221,8 @@ export interface KanbanTask {
   plannedHours: number | null
   /** null when timesheets aren't installed on the instance. */
   effectiveHours: number | null
+  /** res.users ids of the assignees; empty when nobody (or an older gateway). */
+  assigneeIds: number[]
 }
 
 /** A project.task.type record of one instance. */
@@ -364,9 +366,19 @@ export interface HelpdeskTicket {
   loggable: boolean
 }
 
-export interface SearchTicketsRequest {
+/**
+ * Project and assignee filters, keyed per instance ("1:12"): the same id in
+ * two instances is two different records. "none" in assignees selects the
+ * records nobody is assigned to. Empty lists filter nothing.
+ */
+export interface RecordFilters {
+  projects: string[]
+  assignees: string[]
+}
+
+export interface SearchTicketsRequest extends Partial<RecordFilters> {
   action: "SEARCH_TICKETS"
-  /** Optional with `mine`, otherwise 2 to 100 characters. */
+  /** Optional with `mine` or a filter, otherwise 2 to 100 characters. */
   query: string
   /** Only the user's open tickets. */
   mine: boolean
@@ -389,6 +401,37 @@ export interface LogTicketTimeRequest {
   /** YYYY-MM-DD */
   date: string
 }
+
+/* ---- All tasks page ---------------------------------------------- */
+
+/** Any task, assigned to anyone; needs a query, a project or an assignee. */
+export interface ListTasksRequest extends RecordFilters {
+  action: "LIST_TASKS"
+  /** Empty, or 2 to 100 characters: name, project, or "#id". */
+  query: string
+  /** Also done and cancelled tasks, and tasks in folded stages. */
+  includeClosed: boolean
+  instanceIndex?: OdooInstanceIndex
+}
+
+/** An internal user of one instance, for the assignee filter. */
+export interface OdooAssignee {
+  instanceIndex: OdooInstanceIndex
+  userId: number
+  name: string
+}
+
+export interface ListAssigneesRequest {
+  action: "LIST_ASSIGNEES"
+  instanceIndex?: OdooInstanceIndex
+}
+
+export type AssigneesInstanceResult = InstanceResult<{
+  users: OdooAssignee[]
+  /** The signed-in user's id on this instance. */
+  currentUserId: number
+  truncated: boolean
+}>
 
 /* ---- Manual task picker ---------------------------------------- */
 
@@ -457,6 +500,8 @@ export type GatewayRequest =
   | ListProjectsRequest
   | ListProjectTasksRequest
   | UpdateTaskRequest
+  | ListTasksRequest
+  | ListAssigneesRequest
 
 /* ------------------------------------------------------------------ */
 /* github-commits Edge Function contract                               */

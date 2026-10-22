@@ -5,6 +5,7 @@ import {
   Loader2Icon,
   StarIcon,
   TimerIcon,
+  UsersRoundIcon,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
@@ -66,8 +67,10 @@ interface KanbanCardProps {
   context: "project" | "stage"
   onOpenTask: (task: KanbanTask) => void
   onLogTime: (task: KanbanTask) => void
-  /** Without it, the card is read only (Tasks page). */
+  /** Without it, the card is read only. */
   editing?: CardEditing
+  /** Who the task is assigned to, by name; not shown when undefined. */
+  assignees?: string[]
 }
 
 /** "Move to" menu: the keyboard and touch way to change the stage. */
@@ -168,6 +171,7 @@ export function KanbanCard({
   onOpenTask,
   onLogTime,
   editing,
+  assignees,
 }: KanbanCardProps) {
   const { t } = useTranslation()
   const { formatShortDate } = useFormatters()
@@ -258,6 +262,26 @@ export function KanbanCard({
       {detail !== null && (
         <p className="truncate text-xs text-muted-foreground" title={detail}>
           {detail}
+        </p>
+      )}
+
+      {assignees !== undefined && (
+        <p
+          className={cn(
+            "flex min-w-0 items-center gap-1 text-xs text-muted-foreground",
+            assignees.length === 0 && "italic"
+          )}
+          title={assignees.join(", ")}
+        >
+          <UsersRoundIcon
+            className="size-3.5 shrink-0"
+            aria-label={t("allTasks.assignedTo")}
+          />
+          <span className="truncate">
+            {assignees.length === 0
+              ? t("allTasks.assigneeFilter.unassigned")
+              : assignees.join(", ")}
+          </span>
         </p>
       )}
 

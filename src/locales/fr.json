@@ -21,8 +21,8 @@
   },
   "nav": {
     "timesheet": "Feuille de temps",
-    "kanban": "Kanban",
-    "tasks": "Tâches",
+    "kanban": "Mes tâches",
+    "tasks": "Toutes les tâches",
     "history": "Historique",
     "settings": "Paramètres",
     "odooInstances": "Instances Odoo",
@@ -385,31 +385,34 @@
     "doneHint": "Les lignes sont estimées d'après le temps entre les commits. Corrigez-en une si besoin : votre valeur sera conservée."
   },
   "tasks": {
-    "title": "Tâches et tickets",
-    "subtitle": "Retrouvez n'importe quelle tâche ou ticket d'assistance Odoo, qu'il vous soit assigné ou non, et pointez dessus.",
-    "typeLabel": "Quoi rechercher",
-    "tabTasks": "Tâches",
-    "tabTickets": "Tickets d'assistance",
-    "scopeLabel": "Quels tickets",
-    "myTickets": "Mes tickets ouverts",
-    "allTickets": "Tous les tickets ouverts",
-    "search": "Rechercher",
-    "searchTasksPlaceholder": "Nom de tâche, référence, projet ou #ID",
-    "searchTicketsPlaceholder": "Titre du ticket, référence ou #ID",
-    "searchTasksTitle": "Recherchez n'importe quelle tâche",
-    "searchTasksHint": "Tapez au moins 2 caractères : un nom (« Daily »), une référence (« 01-501 »), un projet ou un ID (« #18486 »). Les tâches assignées à d'autres personnes sont aussi trouvées.",
-    "searchTicketsTitle": "Recherchez dans les tickets ouverts",
-    "searchTicketsHint": "Tapez au moins 2 caractères d'un titre, d'une référence ou d'un ID.",
-    "loadError": "Impossible de rechercher dans Odoo",
-    "noResults": "Rien ne correspond à cette recherche",
-    "noResultsHint": "Vérifiez l'orthographe, essayez une recherche plus courte, ou affichez toutes les instances.",
-    "truncated": "Seuls les 50 premiers résultats par instance sont affichés. Précisez la recherche pour trouver les autres.",
     "ticket": "Ticket d'assistance",
-    "ticketNotLoggable": "Impossible de pointer sur ce ticket : son équipe d'assistance ne gère pas les feuilles de temps, ou n'a pas de projet pour cela.",
-    "helpdeskMissing": "Pas de module Assistance sur vos instances",
-    "helpdeskMissingHint": "Les tickets apparaissent ici quand le module Assistance est installé sur l'une de vos instances Odoo.",
-    "noOpenTickets": "Aucun ticket ouvert ne vous est assigné",
-    "noOpenTicketsHint": "Passez à « Tous les tickets ouverts » pour en trouver un assigné à quelqu'un d'autre."
+    "ticketNotLoggable": "Impossible de pointer sur ce ticket : son équipe d'assistance ne gère pas les feuilles de temps, ou n'a pas de projet pour cela."
+  },
+  "allTasks": {
+    "title": "Toutes les tâches",
+    "subtitle": "N'importe quelle tâche ou ticket d'assistance Odoo, qu'il vous soit assigné ou non.",
+    "searchPlaceholder": "Tâche, référence, projet ou #ID",
+    "hintTitle": "Que voulez-vous afficher ?",
+    "hint": "Choisissez un assigné ou un projet, ou tapez au moins 2 caractères : un nom (« Daily »), une référence (« 01-501 »), un projet ou un ID (« #18486 »).",
+    "quickMine": "Mes tâches",
+    "quickUnassigned": "Tâches non assignées",
+    "loadError": "Impossible de charger les tâches",
+    "noMatchHint": "Changez d'assigné ou de projet, essayez une autre recherche, ou affichez les tâches fermées.",
+    "truncated": "Seules les 500 tâches les plus importantes par instance sont affichées. Ajoutez un filtre pour voir les autres.",
+    "ticketsTruncated": "Seuls les 200 premiers tickets ouverts par instance sont affichés. Ajoutez un filtre pour voir les autres.",
+    "assignedTo": "Assignée à",
+    "assigneeFilter": {
+      "label": "Filtrer par assigné",
+      "all": "Tous les assignés",
+      "count_one": "{{count}} assigné",
+      "count_other": "{{count}} assignés",
+      "me": "(vous)",
+      "unassigned": "Non assignée",
+      "search": "Rechercher une personne",
+      "noMatch": "Personne ne correspond",
+      "clear": "Effacer les assignés",
+      "loading": "Chargement des utilisateurs…"
+    }
   },
   "assignTask": {
     "title": "Choisir la tâche",
@@ -449,5 +452,11 @@
     "submitTicket": "Utiliser ce ticket",
     "assignedTicket_one": "Ticket rattaché à {{count}} ligne",
     "assignedTicket_other": "Ticket rattaché à {{count}} lignes"
+  },
+  "update": {
+    "title": "Nouvelle version disponible",
+    "message": "Appuyez sur <keys/> pour recharger la page.",
+    "reloadAction": "Recharger",
+    "dismiss": "Masquer"
   }
 }

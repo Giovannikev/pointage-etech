@@ -19,6 +19,8 @@
  *   { action: "LIST_PROJECTS", instanceIndex }
  *   { action: "LIST_PROJECT_TASKS", instanceIndex, projectId, query? }
  *   { action: "UPDATE_TASK", instanceIndex, taskId, stageId?, status? }
+ *   { action: "LIST_TASKS", query?, projects?, assignees?, includeClosed, instanceIndex? }
+ *   { action: "LIST_ASSIGNEES", instanceIndex? }
  */
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
@@ -137,6 +139,8 @@ interface KanbanTask {
   plannedHours: number | null
   /** null when timesheets aren't installed on the instance. */
   effectiveHours: number | null
+  /** res.users ids of the task's assignees; empty when nobody is assigned. */
+  assigneeIds: number[]
 }
 
 interface KanbanStage {
@@ -190,6 +194,34 @@ interface TicketQuery {
   /** Only the user's open tickets (the query then filters nothing server side). */
   mine: boolean
   instanceIndex: InstanceIndex | null
+  /** Narrow the tickets to these projects and assignees; empty: no filter. */
+  filters: RecordFilters
+}
+
+/**
+ * Project and assignee filters, keyed per instance: the same id in two
+ * instances is two different records. Keys are "1:12" (instance:id), and
+ * "none" in assignees for the records nobody is assigned to.
+ */
+interface RecordFilters {
+  projects: string[]
+  assignees: string[]
+}
+
+/** Any task of the instances, filtered in Odoo (All tasks page). */
+interface TaskListQuery extends RecordFilters {
+  /** Name, project or "#id"; empty when the filters are enough. */
+  query: string
+  /** Also done and cancelled tasks, and tasks in folded stages. */
+  includeClosed: boolean
+  instanceIndex: InstanceIndex | null
+}
+
+/** An internal user of one instance, for the assignee filter. */
+interface OdooAssignee {
+  instanceIndex: InstanceIndex
+  userId: number
+  name: string
 }
 
 /** A project time can be logged in, for the manual task picker. */
@@ -227,6 +259,13 @@ type MyTasksResult = InstanceResult<{
   /** States a task can be set to on this instance (UPDATE_TASK). */
   statusOptions: KanbanTaskStatus[]
   /** True when the task limit was reached and older tasks were left out. */
+  truncated: boolean
+}>
+
+type AssigneesInstanceResult = InstanceResult<{
+  users: OdooAssignee[]
+  /** The signed-in user's id on this instance. */
+  currentUserId: number
   truncated: boolean
 }>
 
@@ -282,6 +321,8 @@ type GatewayRequest =
   | { action: "LIST_PROJECTS"; instanceIndex: InstanceIndex }
   | ({ action: "LIST_PROJECT_TASKS" } & ProjectTaskQuery)
   | ({ action: "UPDATE_TASK" } & TaskUpdate)
+  | ({ action: "LIST_TASKS" } & TaskListQuery)
+  | { action: "LIST_ASSIGNEES"; instanceIndex: InstanceIndex | null }
 
 /* ------------------------------------------------------------------ */
 /* Request validation                                                  */
@@ -302,6 +343,13 @@ const SEARCH_LIMIT = 50
 const MY_TICKETS_LIMIT = 200
 const PROJECT_LIST_LIMIT = 1_000
 const PROJECT_TASKS_LIMIT = 500
+const TASK_LIST_LIMIT = 500
+const ASSIGNEE_LIST_LIMIT = 1_000
+/** Filtered tickets can be many more than a search returns. */
+const FILTERED_TICKETS_LIMIT = 200
+const MAX_FILTER_KEYS = 200
+const PROJECT_FILTER_KEY = /^[12]:\d{1,9}$/
+const ASSIGNEE_FILTER_KEY = /^(?:[12]:\d{1,9}|none)$/
 const MIN_QUERY_LENGTH = 2
 const MAX_QUERY_LENGTH = 100
 const MS_PER_DAY = 86_400_000
@@ -454,6 +502,65 @@ function readQuery(value: unknown, optional: boolean): string {
   return query
 }
 
+/** A list of filter keys; omitted means no filter. */
+function readFilterKeys(
+  value: unknown,
+  field: string,
+  pattern: RegExp
+): string[] {
+  if (value === undefined || value === null) {
+    return []
+  }
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_FILTER_KEYS ||
+    !value.every((key) => typeof key === "string" && pattern.test(key))
+  ) {
+    throw new HttpError(
+      `"${field}" must be at most ${MAX_FILTER_KEYS} keys such as "1:12".`,
+      400
+    )
+  }
+  return [...new Set(value as string[])]
+}
+
+function readRecordFilters(body: Record<string, unknown>): RecordFilters {
+  return {
+    projects: readFilterKeys(body.projects, "projects", PROJECT_FILTER_KEY),
+    assignees: readFilterKeys(body.assignees, "assignees", ASSIGNEE_FILTER_KEY),
+  }
+}
+
+function hasRecordFilters({ projects, assignees }: RecordFilters): boolean {
+  return projects.length > 0 || assignees.length > 0
+}
+
+/*
+ * The two readers below return their type explicitly instead of narrowing
+ * `unknown` inline: the dashboard editor type-checks without strict null
+ * checks, where `x !== null && !guard(x)` doesn't narrow.
+ */
+
+function readOptionalStageId(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+  if (!isPositiveInteger(value)) {
+    throw new HttpError('"stageId" must be a stage id.', 400)
+  }
+  return value
+}
+
+function readOptionalStatus(value: unknown): KanbanTaskStatus | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+  if (!isKanbanTaskStatus(value)) {
+    throw new HttpError('"status" is not a known task state.', 400)
+  }
+  return value
+}
+
 function parseRequest(body: unknown): GatewayRequest {
   if (!isRecord(body)) {
     throw new HttpError("Request body must be a JSON object.", 400)
@@ -495,14 +602,8 @@ function parseRequest(body: unknown): GatewayRequest {
     ) {
       throw new HttpError('"instanceIndex" and "taskId" are required.', 400)
     }
-    const stageId = body.stageId ?? null
-    const status = body.status ?? null
-    if (stageId !== null && !isPositiveInteger(stageId)) {
-      throw new HttpError('"stageId" must be a stage id.', 400)
-    }
-    if (status !== null && !isKanbanTaskStatus(status)) {
-      throw new HttpError('"status" is not a known task state.', 400)
-    }
+    const stageId = readOptionalStageId(body.stageId)
+    const status = readOptionalStatus(body.status)
     if (stageId === null && status === null) {
       throw new HttpError('Send "stageId", "status" or both.', 400)
     }
@@ -568,10 +669,39 @@ function parseRequest(body: unknown): GatewayRequest {
 
   if (body.action === "SEARCH_TICKETS") {
     const mine = body.mine === true
+    const filters = readRecordFilters(body)
     return {
       action: "SEARCH_TICKETS",
       mine,
-      query: readQuery(body.query, mine),
+      // A filter is enough to list tickets: the query becomes optional.
+      query: readQuery(body.query, mine || hasRecordFilters(filters)),
+      instanceIndex: readOptionalInstance(body.instanceIndex),
+      filters,
+    }
+  }
+
+  if (body.action === "LIST_TASKS") {
+    const filters = readRecordFilters(body)
+    const query = readQuery(body.query, true)
+    // Without any filter, every task of the instance would be read.
+    if (query === "" && !hasRecordFilters(filters)) {
+      throw new HttpError(
+        'Send a "query", "projects" or "assignees" to narrow the tasks.',
+        400
+      )
+    }
+    return {
+      action: "LIST_TASKS",
+      query,
+      ...filters,
+      includeClosed: body.includeClosed === true,
+      instanceIndex: readOptionalInstance(body.instanceIndex),
+    }
+  }
+
+  if (body.action === "LIST_ASSIGNEES") {
+    return {
+      action: "LIST_ASSIGNEES",
       instanceIndex: readOptionalInstance(body.instanceIndex),
     }
   }
@@ -622,7 +752,7 @@ function parseRequest(body: unknown): GatewayRequest {
   }
 
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS" or "UPDATE_TASK".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS", "UPDATE_TASK", "LIST_TASKS" or "LIST_ASSIGNEES".',
     400
   )
 }
@@ -1095,6 +1225,8 @@ function readDeadline(value: unknown): string | null {
  */
 interface TaskFieldSupport {
   assigneeDomain: unknown[]
+  /** Holds the assignees: user_ids from Odoo 15, user_id before. */
+  assigneeField: "user_ids" | "user_id"
   fields: string[]
   plannedField: "allocated_hours" | "planned_hours" | null
   statusField: "kanban_state" | "state" | null
@@ -1154,14 +1286,17 @@ async function detectTaskFields(
       ? "state"
       : null
   const hasEffectiveHours = has("effective_hours")
+  const assigneeField = has("user_ids") ? "user_ids" : "user_id"
 
   const fields = BASE_TASK_FIELDS.filter(has)
+  fields.push(assigneeField)
   if (plannedField !== null) fields.push(plannedField)
   if (statusField !== null) fields.push(statusField)
   if (hasEffectiveHours) fields.push("effective_hours")
 
   return {
     assigneeDomain,
+    assigneeField,
     fields,
     plannedField,
     statusField,
@@ -1283,7 +1418,17 @@ function readKanbanTask(
     effectiveHours: support.hasEffectiveHours
       ? (readNumber(record.effective_hours) ?? 0)
       : null,
+    assigneeIds: readAssigneeIds(record[support.assigneeField]),
   }
+}
+
+/** user_ids is a list of ids; user_id a many2one ([id, name] or false). */
+function readAssigneeIds(value: unknown): number[] {
+  if (Array.isArray(value) && value.every(isPositiveInteger)) {
+    return value
+  }
+  const user = readMany2one(value)
+  return user === null ? [] : [user.id]
 }
 
 function readKanbanStage(
@@ -1740,8 +1885,9 @@ function readTicket(
 
 function searchTickets(
   instances: OdooInstanceSettings[],
-  { query, mine, instanceIndex }: TicketQuery
+  { query, mine, instanceIndex, filters }: TicketQuery
 ): Promise<TicketsInstanceResult[]> {
+  const isFiltered = hasRecordFilters(filters)
   return readEachInstance(
     instances,
     selectInstances(instances, instanceIndex),
@@ -1749,6 +1895,16 @@ function searchTickets(
       const support = await detectTicketFields(session)
       if (support === null) {
         return { available: false, tickets: [], truncated: false }
+      }
+      const filterDomain = filterDomainFor(filters, index, {
+        projectField: support.fields.includes("project_id")
+          ? "project_id"
+          : null,
+        assigneeField: "user_id",
+      })
+      // The filters leave nothing to read on this instance.
+      if (filterDomain === null) {
+        return { available: true, tickets: [], truncated: false }
       }
       const id = readIdQuery(query)
       const matches =
@@ -1761,7 +1917,11 @@ function searchTickets(
                 : [[support.refField, "ilike", query]]),
               ...(id === null ? [] : [["id", "=", id]]),
             ])
-      const limit = mine ? MY_TICKETS_LIMIT : SEARCH_LIMIT
+      const limit = mine
+        ? MY_TICKETS_LIMIT
+        : isFiltered
+          ? FILTERED_TICKETS_LIMIT
+          : SEARCH_LIMIT
       const records = await executeKw(
         session,
         TICKET_MODEL,
@@ -1770,6 +1930,7 @@ function searchTickets(
           [
             ...support.openDomain,
             ...(mine ? [["user_id", "=", session.uid]] : []),
+            ...filterDomain,
             ...matches,
           ],
         ],
@@ -2033,6 +2194,190 @@ async function listProjectTasks(
 }
 
 /* ------------------------------------------------------------------ */
+/* Project and assignee filters (LIST_TASKS, SEARCH_TICKETS)           */
+/* ------------------------------------------------------------------ */
+
+/** The ids of the keys ("1:12") that belong to the instance. */
+function idsOf(keys: string[], instanceIndex: InstanceIndex): number[] {
+  const prefix = `${instanceIndex}:`
+  return keys
+    .filter((key) => key.startsWith(prefix))
+    .map((key) => Number(key.slice(prefix.length)))
+}
+
+/**
+ * The Odoo domain of the filters on one instance, or null when they select
+ * nothing there (e.g. only projects of the other instance were picked).
+ * `projectField` null: the model has no project, so a project filter
+ * matches none of its records.
+ */
+function filterDomainFor(
+  { projects, assignees }: RecordFilters,
+  instanceIndex: InstanceIndex,
+  fields: {
+    projectField: string | null
+    assigneeField: string
+  }
+): unknown[] | null {
+  const domain: unknown[] = []
+
+  if (projects.length > 0) {
+    const projectIds = idsOf(projects, instanceIndex)
+    if (projectIds.length === 0 || fields.projectField === null) {
+      return null
+    }
+    domain.push([fields.projectField, "in", projectIds])
+  }
+
+  if (assignees.length > 0) {
+    const userIds = idsOf(assignees, instanceIndex)
+    const leaves: unknown[] = []
+    if (userIds.length > 0) {
+      leaves.push([fields.assigneeField, "in", userIds])
+    }
+    if (assignees.includes("none")) {
+      leaves.push([fields.assigneeField, "=", false])
+    }
+    if (leaves.length === 0) {
+      return null
+    }
+    domain.push(...anyOf(leaves))
+  }
+
+  return domain
+}
+
+/**
+ * Open tasks only: not done or cancelled (Odoo 17+ state), and not in a
+ * folded stage, which is how older versions mark finished work. Mirrors
+ * isClosedTask() in src/utils/kanban.ts.
+ */
+function openTaskDomain(support: TaskFieldSupport): unknown[] {
+  return [
+    ...(support.statusField === "state"
+      ? [["state", "not in", ["1_done", "1_canceled"]]]
+      : []),
+    "|",
+    ["stage_id", "=", false],
+    ["stage_id.fold", "=", false],
+  ]
+}
+
+/* ------------------------------------------------------------------ */
+/* LIST_TASKS (All tasks page)                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Any active task with a project, assigned to anyone, narrowed by the
+ * query, projects and assignees; with the stages and states the board
+ * needs, like GET_MY_TASKS.
+ */
+function listTasks(
+  instances: OdooInstanceSettings[],
+  { query, projects, assignees, includeClosed, instanceIndex }: TaskListQuery
+): Promise<MyTasksResult[]> {
+  const id = readIdQuery(query)
+  const matches =
+    query === ""
+      ? []
+      : anyOf([
+          ["name", "ilike", query],
+          ["project_id", "ilike", query],
+          ...(id === null ? [] : [["id", "=", id]]),
+        ])
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const support = await detectTaskFields(session)
+      const statuses = statusOptions(support.statusField)
+      const filterDomain = filterDomainFor({ projects, assignees }, index, {
+        projectField: "project_id",
+        assigneeField: support.assigneeField,
+      })
+      if (filterDomain === null) {
+        return {
+          tasks: [],
+          stages: [],
+          statusOptions: statuses,
+          truncated: false,
+        }
+      }
+      const records = await executeKw(
+        session,
+        "project.task",
+        "search_read",
+        [
+          [
+            ["active", "=", true],
+            ["project_id", "!=", false],
+            ...(includeClosed ? [] : openTaskDomain(support)),
+            ...filterDomain,
+            ...matches,
+          ],
+        ],
+        {
+          fields: support.fields,
+          limit: TASK_LIST_LIMIT,
+          order: "priority desc, id desc",
+        }
+      )
+      const raw = readRecords(records, session, "task")
+      const tasks = raw.flatMap(
+        (record) => readKanbanTask(record, index, support) ?? []
+      )
+      return {
+        tasks,
+        stages: await readStages(session, index, tasks),
+        statusOptions: statuses,
+        truncated: raw.length >= TASK_LIST_LIMIT,
+      }
+    }
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* LIST_ASSIGNEES (assignee filter)                                    */
+/* ------------------------------------------------------------------ */
+
+/** The internal users of each instance (portal users get no tasks), by name. */
+function listAssignees(
+  instances: OdooInstanceSettings[],
+  instanceIndex: InstanceIndex | null
+): Promise<AssigneesInstanceResult[]> {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const fields = await getModelFields(session, "res.users")
+      const records = await executeKw(
+        session,
+        "res.users",
+        "search_read",
+        [fields.has("share") ? [["share", "=", false]] : []],
+        {
+          fields: ["id", "name"],
+          limit: ASSIGNEE_LIST_LIMIT,
+          order: "name asc, id asc",
+        }
+      )
+      const raw = readRecords(records, session, "user")
+      return {
+        users: raw.flatMap((record): OdooAssignee[] =>
+          isRecord(record) &&
+          isPositiveInteger(record.id) &&
+          typeof record.name === "string"
+            ? [{ instanceIndex: index, userId: record.id, name: record.name }]
+            : []
+        ),
+        currentUserId: session.uid,
+        truncated: raw.length >= ASSIGNEE_LIST_LIMIT,
+      }
+    }
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP handler                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -2085,6 +2430,15 @@ serveJson("odoo-gateway", {
         return await listProjectTasks(instances, gatewayRequest)
       case "UPDATE_TASK":
         return { task: await updateTask(instances, gatewayRequest) }
+      case "LIST_TASKS":
+        return { instances: await listTasks(instances, gatewayRequest) }
+      case "LIST_ASSIGNEES":
+        return {
+          instances: await listAssignees(
+            instances,
+            gatewayRequest.instanceIndex
+          ),
+        }
     }
   },
 })

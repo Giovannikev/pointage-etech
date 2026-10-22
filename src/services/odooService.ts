@@ -9,6 +9,7 @@ import {
   invokeFunction,
 } from "@/services/edgeFunctionClient"
 import type {
+  AssigneesInstanceResult,
   CommitPeriod,
   GatewayRequest,
   InstanceResult,
@@ -19,8 +20,10 @@ import type {
   ListProjectTasksResponse,
   LoggedTimesheet,
   MyTasksInstanceResult,
+  OdooAssignee,
   OdooProject,
   OdooInstanceIndex,
+  RecordFilters,
   SubmissionResult,
   TaskDetails,
   TaskSearchResult,
@@ -223,6 +226,8 @@ const TASK_SEARCH_PREFIX = "taskSearch:"
 const TICKETS_PREFIX = "tickets:"
 const PROJECTS_PREFIX = "projects:"
 const PROJECT_TASKS_PREFIX = "projectTasks:"
+const TASK_LIST_PREFIX = "taskList:"
+const ASSIGNEES_KEY: CacheKey<AssigneesInstanceResult[]> = cacheKey("assignees")
 
 function historyKey(
   period: CommitPeriod
@@ -240,6 +245,7 @@ function invalidateTimesheetReads(): void {
   odooCache.invalidate(HISTORY_PREFIX)
   odooCache.invalidate(MY_TASKS_KEY.id)
   odooCache.invalidate(TASK_SEARCH_PREFIX)
+  odooCache.invalidate(TASK_LIST_PREFIX)
   odooCache.invalidate(TICKETS_PREFIX)
 }
 
@@ -321,7 +327,8 @@ function toKanbanTask(value: unknown): KanbanTask {
     isNullableString(value.deadline) &&
     (value.status === null || isKanbanStatus(value.status)) &&
     isNullableNumber(value.plannedHours) &&
-    isNullableNumber(value.effectiveHours)
+    isNullableNumber(value.effectiveHours) &&
+    (value.assigneeIds === undefined || Array.isArray(value.assigneeIds))
   ) {
     return {
       instanceIndex: value.instanceIndex,
@@ -336,6 +343,10 @@ function toKanbanTask(value: unknown): KanbanTask {
       status: value.status,
       plannedHours: value.plannedHours,
       effectiveHours: value.effectiveHours,
+      // Older gateways don't send the assignees.
+      assigneeIds: Array.isArray(value.assigneeIds)
+        ? value.assigneeIds.filter(isPositiveInteger)
+        : [],
     }
   }
   throw new InvalidResponseError(GATEWAY_FUNCTION)
@@ -415,6 +426,7 @@ export async function updateTask(
     // Every list showing tasks may hold the old stage or state.
     odooCache.invalidate(MY_TASKS_KEY.id)
     odooCache.invalidate(TASK_SEARCH_PREFIX)
+    odooCache.invalidate(TASK_LIST_PREFIX)
     odooCache.invalidate(PROJECT_TASKS_PREFIX)
   }
 }
@@ -679,26 +691,40 @@ function toHelpdeskTicket(value: unknown): HelpdeskTicket {
   throw new InvalidResponseError(GATEWAY_FUNCTION)
 }
 
+const NO_FILTERS: RecordFilters = { projects: [], assignees: [] }
+
+/** Same filters, same text: the order of the keys doesn't matter. */
+function filtersKey({ projects, assignees }: RecordFilters): string {
+  return `${[...projects].sort().join(",")}|${[...assignees].sort().join(",")}`
+}
+
 function ticketsKey(
   query: string,
-  mine: boolean
+  mine: boolean,
+  filters: RecordFilters
 ): CacheKey<TicketsInstanceResult[]> {
-  return cacheKey(
-    searchKey(`${TICKETS_PREFIX}${mine ? "mine" : "all"}:`, query)
-  )
+  const scope = mine ? "mine" : "all"
+  // Unfiltered keys stay as they were: the boards share them.
+  const filtered =
+    filters.projects.length + filters.assignees.length === 0
+      ? ""
+      : `[${filtersKey(filters)}]`
+  return cacheKey(searchKey(`${TICKETS_PREFIX}${scope}${filtered}:`, query))
 }
 
 /**
  * The user's open tickets (`mine`, query optional) or every open ticket
- * matching the query. Cached for a minute.
+ * matching the query and/or the project and assignee filters. Cached for a
+ * minute.
  */
 export function searchTickets(
   query: string,
   mine: boolean,
-  options: CacheReadOptions = {}
+  options: CacheReadOptions = {},
+  filters: RecordFilters = NO_FILTERS
 ): Promise<TicketsInstanceResult[]> {
   return odooCache.getOrFetch(
-    ticketsKey(query, mine),
+    ticketsKey(query, mine, filters),
     SEARCH_TTL_MS,
     async () =>
       readInstanceResults(
@@ -706,6 +732,8 @@ export function searchTickets(
           action: "SEARCH_TICKETS",
           query: query.trim(),
           mine,
+          projects: filters.projects,
+          assignees: filters.assignees,
         })
       ).map((value) =>
         toInstanceResult(value, (record) => ({
@@ -720,9 +748,10 @@ export function searchTickets(
 
 export function peekTickets(
   query: string,
-  mine: boolean
+  mine: boolean,
+  filters: RecordFilters = NO_FILTERS
 ): TicketsInstanceResult[] | undefined {
-  return odooCache.peek(ticketsKey(query, mine))
+  return odooCache.peek(ticketsKey(query, mine, filters))
 }
 
 /** Logs time on a helpdesk ticket; resolves with the new line's id. */
@@ -855,4 +884,143 @@ export function peekProjectTasks(
   query: string
 ): ListProjectTasksResponse | undefined {
   return odooCache.peek(projectTasksKey(instanceIndex, projectId, query))
+}
+
+export interface ProjectsInstanceResult {
+  instanceIndex: OdooInstanceIndex
+  /** undefined when the instance couldn't be read. */
+  projects: OdooProject[] | undefined
+}
+
+/**
+ * The projects of several instances, each read (and cached) on its own: an
+ * instance that fails only leaves its projects out.
+ */
+export async function fetchProjectsOf(
+  instanceIndexes: OdooInstanceIndex[],
+  options: CacheReadOptions = {}
+): Promise<ProjectsInstanceResult[]> {
+  const results = await Promise.allSettled(
+    instanceIndexes.map((index) => fetchProjects(index, options))
+  )
+  return results.map((result, position) => ({
+    instanceIndex: instanceIndexes[position],
+    projects: result.status === "fulfilled" ? result.value.projects : undefined,
+  }))
+}
+
+/** The cached projects, when every instance's are fresh. */
+export function peekProjectsOf(
+  instanceIndexes: OdooInstanceIndex[]
+): ProjectsInstanceResult[] | undefined {
+  const results: ProjectsInstanceResult[] = []
+  for (const instanceIndex of instanceIndexes) {
+    const cached = peekProjects(instanceIndex)
+    if (cached === undefined) {
+      return undefined
+    }
+    results.push({ instanceIndex, projects: cached.projects })
+  }
+  return results
+}
+
+/* ------------------------------------------------------------------ */
+/* LIST_TASKS / LIST_ASSIGNEES (All tasks page)                        */
+/* ------------------------------------------------------------------ */
+
+export interface TaskListFilters extends RecordFilters {
+  /** Sent to Odoo as is: empty, or 2 to 100 characters. */
+  query: string
+  includeClosed: boolean
+}
+
+function taskListKey({
+  query,
+  includeClosed,
+  ...filters
+}: TaskListFilters): CacheKey<MyTasksInstanceResult[]> {
+  return cacheKey(
+    searchKey(
+      `${TASK_LIST_PREFIX}${includeClosed ? "closed" : "open"}:${filtersKey(filters)}:`,
+      query
+    )
+  )
+}
+
+/**
+ * Any task of the instances, assigned to anyone, filtered in Odoo; shaped
+ * like the user's own tasks so the same board shows them. Cached for a
+ * minute.
+ */
+export function fetchTaskList(
+  filters: TaskListFilters,
+  options: CacheReadOptions = {}
+): Promise<MyTasksInstanceResult[]> {
+  return odooCache.getOrFetch(
+    taskListKey(filters),
+    SEARCH_TTL_MS,
+    async () =>
+      readInstanceResults(
+        await invokeGateway({
+          action: "LIST_TASKS",
+          query: filters.query.trim(),
+          projects: filters.projects,
+          assignees: filters.assignees,
+          includeClosed: filters.includeClosed,
+        })
+      ).map(toMyTasksResult),
+    options
+  )
+}
+
+export function peekTaskList(
+  filters: TaskListFilters
+): MyTasksInstanceResult[] | undefined {
+  return odooCache.peek(taskListKey(filters))
+}
+
+function toOdooAssignee(value: unknown): OdooAssignee {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.userId) &&
+    typeof value.name === "string"
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      userId: value.userId,
+      name: value.name,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+/** The internal users of every instance; cached for a few minutes. */
+export function fetchAssignees(
+  options: CacheReadOptions = {}
+): Promise<AssigneesInstanceResult[]> {
+  return odooCache.getOrFetch(
+    ASSIGNEES_KEY,
+    PROJECTS_TTL_MS,
+    async () =>
+      readInstanceResults(
+        await invokeGateway({ action: "LIST_ASSIGNEES" })
+      ).map((value) =>
+        toInstanceResult(value, (record) => {
+          if (!isPositiveInteger(record.currentUserId)) {
+            throw new InvalidResponseError(GATEWAY_FUNCTION)
+          }
+          return {
+            users: readList(record.users, toOdooAssignee),
+            currentUserId: record.currentUserId,
+            truncated: record.truncated === true,
+          }
+        })
+      ),
+    options
+  )
+}
+
+export function peekAssignees(): AssigneesInstanceResult[] | undefined {
+  return odooCache.peek(ASSIGNEES_KEY)
 }

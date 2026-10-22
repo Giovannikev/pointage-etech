@@ -20,6 +20,7 @@ export function kanbanTask(overrides: Partial<KanbanTask> = {}): KanbanTask {
     status: null,
     plannedHours: null,
     effectiveHours: 0,
+    assigneeIds: [],
     ...overrides,
   }
 }

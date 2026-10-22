@@ -1,22 +1,63 @@
-import { useEffect } from "react"
+import { lazy, Suspense, useEffect } from "react"
 import { Loader2Icon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { CenteredScreen } from "@/components/CenteredScreen"
+import { UpdateBanner } from "@/components/UpdateBanner"
 import { SettingsProvider } from "@/contexts/SettingsContext"
 import { useHashNavigation } from "@/hooks/useHashNavigation"
 import { useSession } from "@/hooks/useSession"
 import { useTimesheet } from "@/hooks/useTimesheet"
+import { useVersionCheck } from "@/hooks/useVersionCheck"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
 import { SignInPage } from "@/pages/auth/SignInPage"
-import { HistoryPage } from "@/pages/history/HistoryPage"
-import { KanbanPage } from "@/pages/kanban/KanbanPage"
-import { SettingsPage } from "@/pages/settings/SettingsPage"
-import { TasksPage } from "@/pages/tasks/TasksPage"
-import { TimesheetPage } from "@/pages/timesheet/TimesheetPage"
 import { signOut } from "@/services/authService"
 import { clearOdooCache } from "@/services/odooService"
+
+/*
+ * Each page is its own chunk, loaded the first time it is opened: the first
+ * screen doesn't wait for the code of the others. The PWA service worker
+ * still caches them all, so the app keeps working offline.
+ */
+const TimesheetPage = lazy(() =>
+  import("@/pages/timesheet/TimesheetPage").then((module) => ({
+    default: module.TimesheetPage,
+  }))
+)
+const KanbanPage = lazy(() =>
+  import("@/pages/kanban/KanbanPage").then((module) => ({
+    default: module.KanbanPage,
+  }))
+)
+const TasksPage = lazy(() =>
+  import("@/pages/tasks/TasksPage").then((module) => ({
+    default: module.TasksPage,
+  }))
+)
+const HistoryPage = lazy(() =>
+  import("@/pages/history/HistoryPage").then((module) => ({
+    default: module.HistoryPage,
+  }))
+)
+const SettingsPage = lazy(() =>
+  import("@/pages/settings/SettingsPage").then((module) => ({
+    default: module.SettingsPage,
+  }))
+)
+
+/** Shown in the page area while a page's code loads. */
+function PageLoader() {
+  const { t } = useTranslation()
+  return (
+    <div className="flex flex-1 items-center justify-center py-16">
+      <Loader2Icon
+        className="size-6 animate-spin text-muted-foreground"
+        aria-label={t("common.loading")}
+      />
+    </div>
+  )
+}
 
 function Workspace({ userEmail }: { userEmail: string }) {
   const { t } = useTranslation()
@@ -61,14 +102,32 @@ function Workspace({ userEmail }: { userEmail: string }) {
       userEmail={userEmail}
       onSignOut={handleSignOut}
     >
-      {renderView()}
+      <Suspense fallback={<PageLoader />}>{renderView()}</Suspense>
     </DashboardLayout>
   )
 }
 
 export function App() {
-  const { t } = useTranslation()
   const session = useSession()
+  // Signed in or not: a stale sign-in page needs the reload as much.
+  const versionCheck = useVersionCheck()
+
+  return (
+    <>
+      <SessionScreen session={session} />
+      {versionCheck.isUpdateAvailable && (
+        <UpdateBanner onDismiss={versionCheck.dismiss} />
+      )}
+    </>
+  )
+}
+
+function SessionScreen({
+  session,
+}: {
+  session: ReturnType<typeof useSession>
+}) {
+  const { t } = useTranslation()
 
   switch (session.status) {
     case "loading":

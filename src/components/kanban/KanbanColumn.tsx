@@ -28,6 +28,8 @@ interface KanbanColumnProps {
   cardEditing?: (task: KanbanTask) => CardEditing
   /** Set while a card is dragged over the board. */
   drop?: ColumnDrop
+  /** Names the assignees on each task card (All tasks page). */
+  assigneesOf?: (task: KanbanTask) => string[]
 }
 
 /** What the dragged card would become in this column. */
@@ -91,6 +93,7 @@ export function KanbanColumn({
   onLogTime,
   cardEditing,
   drop,
+  assigneesOf,
 }: KanbanColumnProps) {
   const { t } = useTranslation()
   const { formatHours } = useFormatters()
@@ -188,6 +191,7 @@ export function KanbanColumn({
                 onOpenTask={onOpenTask}
                 onLogTime={(task) => onLogTime(taskTarget(task))}
                 editing={cardEditing?.(card.task)}
+                assignees={assigneesOf?.(card.task)}
               />
             ) : (
               <TicketCard
