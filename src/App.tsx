@@ -11,6 +11,7 @@ import { useSession } from "@/hooks/useSession"
 import { useTimesheet } from "@/hooks/useTimesheet"
 import { useVersionCheck } from "@/hooks/useVersionCheck"
 import { DashboardLayout } from "@/layouts/DashboardLayout"
+import { ResetPasswordPage } from "@/pages/auth/ResetPasswordPage"
 import { SignInPage } from "@/pages/auth/SignInPage"
 import { signOut } from "@/services/authService"
 import { clearOdooCache } from "@/services/odooService"
@@ -91,7 +92,7 @@ function Workspace({ userEmail }: { userEmail: string }) {
       case "history":
         return <HistoryPage onOpenSettings={openSettings} />
       case "settings":
-        return <SettingsPage />
+        return <SettingsPage userEmail={userEmail} />
     }
   }
 
@@ -150,6 +151,13 @@ function SessionScreen({
       )
     case "signedOut":
       return <SignInPage />
+    case "recovery":
+      return (
+        <ResetPasswordPage
+          email={session.user.email ?? ""}
+          onDone={session.finishRecovery}
+        />
+      )
     case "signedIn":
       return (
         // Keyed by user so nothing from a previous account survives a switch.

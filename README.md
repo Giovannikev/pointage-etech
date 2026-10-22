@@ -304,6 +304,16 @@ to the project of its helpdesk team, with `helpdesk_ticket_id` set, as Odoo's
 own ticket timesheets do. Instances without the Helpdesk app, or whose teams
 don't track time, are detected and shown as such.
 
+Passwords: **Settings → Account** changes the password (the current one is
+checked first) or emails a reset link; the sign-in page has **Forgot
+password?**. The link opens Pointage, which asks for a new password. In
+Supabase, **Authentication → URL Configuration** must list the app's URL
+(`https://pointage-etech.netlify.app`, plus `http://localhost:5173` for
+development) in **Redirect URLs**, and **Authentication → SMTP Settings**
+needs a custom SMTP server for the emails to reach every user: Supabase's
+built-in sender only writes to the project's team members, a few times an
+hour.
+
 Validated timesheets (Odoo Timesheets app, `validated` field) are shown
 locked and can't be edited or deleted from Pointage.
 

@@ -1,9 +1,15 @@
 import { useTranslation } from "react-i18next"
 
+import { PasswordSettingsCard } from "@/components/settings/PasswordSettingsCard"
 import { SettingsForm } from "@/components/settings/SettingsForm"
 import { SettingsGate } from "@/components/settings/SettingsGate"
 
-export function SettingsPage() {
+interface SettingsPageProps {
+  /** The signed-in user's email, for the password card. */
+  userEmail: string
+}
+
+export function SettingsPage({ userEmail }: SettingsPageProps) {
   const { t } = useTranslation()
 
   return (
@@ -19,6 +25,16 @@ export function SettingsPage() {
       <SettingsGate>
         {(settings) => <SettingsForm settings={settings} />}
       </SettingsGate>
+      {/* Outside the gate: the password doesn't depend on the Odoo settings. */}
+      <section className="grid gap-4" aria-labelledby="account-heading">
+        <h3
+          id="account-heading"
+          className="mt-4 text-lg font-semibold tracking-tight"
+        >
+          {t("settings.account")}
+        </h3>
+        <PasswordSettingsCard email={userEmail} />
+      </section>
     </main>
   )
 }
