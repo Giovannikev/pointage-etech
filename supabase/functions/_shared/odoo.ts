@@ -1,3 +1,4 @@
+import { readMajorVersion } from "./chatterNote.ts"
 import { HttpError } from "./errors.ts"
 import type { InstanceIndex, OdooInstanceSettings } from "./settings.ts"
 import { isPositiveInteger, isRecord } from "./validation.ts"
@@ -178,6 +179,29 @@ export function executeKw(
     args,
     Object.keys(context).length === 0 ? kwargs : { ...kwargs, context },
   ])
+}
+
+/** Survives between requests while the function instance stays warm. */
+const versionCache = new Map<string, number | null>()
+
+/** The server's major version (16, 17...); null when Odoo doesn't tell. */
+export async function readServerMajorVersion(
+  session: OdooSession
+): Promise<number | null> {
+  const { url } = session.connection
+  if (!versionCache.has(url)) {
+    const version = await callService(
+      session.connection,
+      "common",
+      "version",
+      []
+    )
+    versionCache.set(
+      url,
+      isRecord(version) ? readMajorVersion(version.server_version_info) : null
+    )
+  }
+  return versionCache.get(url) ?? null
 }
 
 const LANG_CACHE_TTL_MS = 10 * 60 * 1000

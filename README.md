@@ -277,6 +277,7 @@ it is kept as written. A description edited by hand is never regenerated.
 | `LOG_TICKET_TIME` | `instanceIndex`, `ticketId`, `hours`, `description`, `date` | The created timesheet id, logged on the ticket's project |
 | `LIST_TASKS` | `query?`, `projects?`, `assignees?` (at least one), `includeClosed`, `instanceIndex?` | Any active task with a project, assigned to anyone, with its stages (500 max per instance) |
 | `LIST_ASSIGNEES` | `instanceIndex?` | The internal users of each instance, and the signed-in user's id there |
+| `POST_TASK_NOTE` | `instanceIndex`, `taskId`, `note` (plain text, 20,000 chars max), `approve` | Posts an internal note in the task chatter (_Log note_), then sets the task to approved when `approve` is true; returns the message id and the task |
 
 Filters are keyed per instance: `projects: ["1:12"]`, `assignees: ["2:7", "none"]`
 (`none`: nobody assigned).
@@ -313,6 +314,10 @@ development) in **Redirect URLs**, and **Authentication → SMTP Settings**
 needs a custom SMTP server for the emails to reach every user: Supabase's
 built-in sender only writes to the project's team members, a few times an
 hour.
+
+The **⋮** menu of a card on both boards has **Log note**: it posts a plain
+text note in the task chatter as an internal note, keeping its lines and
+indentation, and can set the task to _Approved_ in the same step.
 
 Validated timesheets (Odoo Timesheets app, `validated` field) are shown
 locked and can't be edited or deleted from Pointage.
@@ -394,6 +399,29 @@ public/                     Favicon and PWA icons
 | `pnpm typecheck` | Type-check only                    |
 | `pnpm lint`      | ESLint                             |
 | `pnpm format`    | Prettier                           |
+| `node scripts/pmoTask.ts` | Post a test note on a PMO task and approve it |
+
+## PMO notes from the command line
+
+`scripts/pmoTask.ts` posts a test note on a PMO task and sets the task to
+_Approved_, with your own Odoo account. Claude runs it at the end of a test
+session (skill `pmo-recette`), but it works by hand too. Fill `PMO_URL`,
+`PMO_LOGIN`, `PMO_API_KEY` (and `PMO_DB` when the server hosts several
+databases) in `.env`, then:
+
+```bash
+node scripts/pmoTask.ts show 03-500
+node scripts/pmoTask.ts approve 03-500 --file note.txt --dry-run
+node scripts/pmoTask.ts approve 03-500 --file note.txt
+node scripts/pmoTask.ts note "#1234" --file note.txt
+```
+
+The task is a reference found in its name (`03-500`, whole token, as for
+commits) or an id (`#1234`); several matches are listed and nothing is
+written. The note is plain text (from `--file` or stdin) and is posted as an
+internal note, like _Log note_ in the chatter, keeping its lines and
+indentation. `approve` then writes `state = 03_approved` (Odoo 17+) or
+`kanban_state = done` (up to 16) and reads the task back to check it.
 
 ## Troubleshooting
 

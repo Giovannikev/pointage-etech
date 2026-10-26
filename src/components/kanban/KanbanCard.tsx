@@ -3,6 +3,7 @@ import {
   CalendarClockIcon,
   EllipsisVerticalIcon,
   Loader2Icon,
+  NotebookPenIcon,
   StarIcon,
   TimerIcon,
   UsersRoundIcon,
@@ -20,6 +21,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -56,6 +58,8 @@ export interface CardEditing {
   isDraggable: boolean
   onChangeStatus: (task: KanbanTask, status: KanbanTaskStatus) => void
   onMove: (task: KanbanTask, stage: KanbanStage) => void
+  /** Opens the dialog posting a note in the task's chatter. */
+  onLogNote: (task: KanbanTask) => void
   onDragStart: (task: KanbanTask) => void
   onDragEnd: () => void
 }
@@ -73,7 +77,7 @@ interface KanbanCardProps {
   assignees?: string[]
 }
 
-/** "Move to" menu: the keyboard and touch way to change the stage. */
+/** Card menu: chatter note, and "Move to", the keyboard and touch way to change the stage. */
 function MoveMenu({
   task,
   editing,
@@ -102,6 +106,11 @@ function MoveMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="max-h-80 min-w-52">
+        <DropdownMenuItem onSelect={() => editing.onLogNote(task)}>
+          <NotebookPenIcon />
+          {t("kanban.logNote")}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuLabel>{t("kanban.moveTo")}</DropdownMenuLabel>
         {targets.map((stage) => (
           <DropdownMenuItem

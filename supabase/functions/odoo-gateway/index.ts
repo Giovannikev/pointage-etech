@@ -19,17 +19,20 @@
  *   { action: "LIST_PROJECTS", instanceIndex }
  *   { action: "LIST_PROJECT_TASKS", instanceIndex, projectId, query? }
  *   { action: "UPDATE_TASK", instanceIndex, taskId, stageId?, status? }
+ *   { action: "POST_TASK_NOTE", instanceIndex, taskId, note, approve }
  *   { action: "LIST_TASKS", query?, projects?, assignees?, includeClosed, instanceIndex? }
  *   { action: "LIST_ASSIGNEES", instanceIndex? }
  */
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
+import { noteToHtml } from "../_shared/chatterNote.ts"
 import {
   createSessionPool,
   executeKw,
   OdooRpcError,
   type OdooSession,
   readMany2one,
+  readServerMajorVersion,
 } from "../_shared/odoo.ts"
 import {
   INSTANCE_INDEXES,
@@ -296,6 +299,15 @@ interface TimesheetUpdate extends TimesheetReference {
   description: string
 }
 
+/** An internal note for a task's chatter, optionally approving the task. */
+interface TaskNote {
+  instanceIndex: InstanceIndex
+  taskId: number
+  /** Plain text; its lines and indentation are kept. */
+  note: string
+  approve: boolean
+}
+
 interface HistoryQuery {
   dateFrom: string
   dateTo: string
@@ -321,6 +333,7 @@ type GatewayRequest =
   | { action: "LIST_PROJECTS"; instanceIndex: InstanceIndex }
   | ({ action: "LIST_PROJECT_TASKS" } & ProjectTaskQuery)
   | ({ action: "UPDATE_TASK" } & TaskUpdate)
+  | ({ action: "POST_TASK_NOTE" } & TaskNote)
   | ({ action: "LIST_TASKS" } & TaskListQuery)
   | { action: "LIST_ASSIGNEES"; instanceIndex: InstanceIndex | null }
 
@@ -334,6 +347,7 @@ const MAX_LOOKUPS_PER_REQUEST = 500
 const TIMESHEET_LOOKUP_LIMIT = 2_000
 const MAX_TASK_REF_LENGTH = 64
 const MAX_DESCRIPTION_LENGTH = 2_000
+const MAX_NOTE_LENGTH = 20_000
 const TASK_CANDIDATE_LIMIT = 20
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const MY_TASKS_LIMIT = 1_000
@@ -616,6 +630,28 @@ function parseRequest(body: unknown): GatewayRequest {
     }
   }
 
+  if (body.action === "POST_TASK_NOTE") {
+    if (
+      !isInstanceIndex(body.instanceIndex) ||
+      !isPositiveInteger(body.taskId)
+    ) {
+      throw new HttpError('"instanceIndex" and "taskId" are required.', 400)
+    }
+    if (!isNonEmptyString(body.note, MAX_NOTE_LENGTH)) {
+      throw new HttpError(
+        `"note" must be a non-empty text of at most ${MAX_NOTE_LENGTH} characters.`,
+        400
+      )
+    }
+    return {
+      action: "POST_TASK_NOTE",
+      instanceIndex: body.instanceIndex,
+      taskId: body.taskId,
+      note: body.note,
+      approve: body.approve === true,
+    }
+  }
+
   if (body.action === "FIND_TIMESHEETS") {
     const lookups = readBatch(
       body.lookups,
@@ -752,7 +788,7 @@ function parseRequest(body: unknown): GatewayRequest {
   }
 
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS", "UPDATE_TASK", "LIST_TASKS" or "LIST_ASSIGNEES".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS", "UPDATE_TASK", "POST_TASK_NOTE", "LIST_TASKS" or "LIST_ASSIGNEES".',
     400
   )
 }
@@ -2105,6 +2141,54 @@ async function updateTask(
 }
 
 /* ------------------------------------------------------------------ */
+/* POST_TASK_NOTE (test note in the chatter)                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Posts an internal note on the task, as "Log note" does in the chatter,
+ * with the user's own Odoo account, then sets the task to approved when
+ * asked: the note says why it was approved.
+ */
+async function postTaskNote(
+  instances: OdooInstanceSettings[],
+  { instanceIndex, taskId, note, approve }: TaskNote
+): Promise<{ messageId: number; task: KanbanTask }> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  const support = await detectTaskFields(session)
+  // Fails early when the task can't be read, before anything is written.
+  await readOneTask(session, instanceIndex, taskId, support)
+
+  const kwargs: Record<string, unknown> = {
+    body: noteToHtml(note),
+    message_type: "comment",
+    subtype_xmlid: "mail.mt_note",
+  }
+  // From Odoo 17, a string body is escaped unless flagged as HTML.
+  const majorVersion = await readServerMajorVersion(session)
+  if (majorVersion === null || majorVersion >= 17) {
+    kwargs.body_is_html = true
+  }
+  const posted = await asConflict(
+    executeKw(session, "project.task", "message_post", [[taskId]], kwargs)
+  )
+  // message_post returns the message id, or [id] on some versions.
+  const messageId = Array.isArray(posted) ? posted[0] : posted
+  if (!isPositiveInteger(messageId)) {
+    throw new HttpError("Odoo didn't confirm the note.", 502)
+  }
+
+  const task = approve
+    ? await updateTask(instances, {
+        instanceIndex,
+        taskId,
+        stageId: null,
+        status: "approved",
+      })
+    : await readOneTask(session, instanceIndex, taskId, support)
+  return { messageId, task }
+}
+
+/* ------------------------------------------------------------------ */
 /* LIST_PROJECTS / LIST_PROJECT_TASKS (manual task picker)             */
 /* ------------------------------------------------------------------ */
 
@@ -2430,6 +2514,8 @@ serveJson("odoo-gateway", {
         return await listProjectTasks(instances, gatewayRequest)
       case "UPDATE_TASK":
         return { task: await updateTask(instances, gatewayRequest) }
+      case "POST_TASK_NOTE":
+        return await postTaskNote(instances, gatewayRequest)
       case "LIST_TASKS":
         return { instances: await listTasks(instances, gatewayRequest) }
       case "LIST_ASSIGNEES":

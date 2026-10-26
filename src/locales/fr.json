@@ -268,6 +268,7 @@
     "hoursLogged": "{{hours}} pointées",
     "hoursOfPlanned": "{{hours}} sur {{planned}}",
     "logTime": "Pointer",
+    "logNote": "Enregistrer une note",
     "noProject": "Cette tâche n'a pas de projet : impossible d'y pointer du temps.",
     "status": {
       "in_progress": "En cours",
@@ -332,6 +333,16 @@
     "submit": "Pointer",
     "logged": "{{hours}} pointées le {{date}}",
     "titleTicket": "Pointer sur le ticket"
+  },
+  "taskNote": {
+    "title": "Enregistrer une note",
+    "note": "Note",
+    "placeholder": "Note interne, visible uniquement par les employés",
+    "hint": "Publiée dans le chatter de la tâche en note interne, comme « Enregistrer une note » dans Odoo. Les lignes et l’indentation sont conservées.",
+    "approve": "Passer aussi la tâche en Approuvée",
+    "submit": "Enregistrer la note",
+    "posted": "Note enregistrée dans Odoo",
+    "postedApproved": "Note enregistrée et tâche approuvée"
   },
   "history": {
     "subtitle": "Le temps que vous avez pointé dans Odoo sur la période.",

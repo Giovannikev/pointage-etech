@@ -20,6 +20,7 @@ import {
   QuickLogDialog,
   type QuickLogResult,
 } from "@/components/kanban/QuickLogDialog"
+import { TaskNoteDialog } from "@/components/kanban/TaskNoteDialog"
 import { type LogTarget } from "@/components/timesheet/logTarget"
 import {
   InstanceFilter,
@@ -230,6 +231,7 @@ export function TaskBoard({ scope }: TaskBoardProps) {
   /** Columns whose folded state the user flipped, keyed by column key. */
   const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set())
   const quickLog = useDialogTarget<LogTarget>()
+  const taskNote = useDialogTarget<KanbanTask>()
   const taskDetails = useTaskDetails()
 
   /* ---- What Odoo is asked for (All tasks) -------------------------- */
@@ -590,10 +592,11 @@ export function TaskBoard({ scope }: TaskBoardProps) {
       isDraggable: groupBy === "stage" && task.projectId !== null,
       onChangeStatus: (current, status) => void changeStatus(current, status),
       onMove: (current, stage) => void moveTask(current, stage),
+      onLogNote: taskNote.open,
       onDragStart: setDragged,
       onDragEnd: () => setDragged(null),
     }),
-    [data, saving, groupBy, changeStatus, moveTask]
+    [data, saving, groupBy, changeStatus, moveTask, taskNote.open]
   )
 
   /** All tasks names who works on each task, once the users are known. */
@@ -619,6 +622,15 @@ export function TaskBoard({ scope }: TaskBoardProps) {
         void moveTask(task, stage)
       },
     }
+  }
+
+  const handleNotePosted = (saved: KanbanTask, approved: boolean): void => {
+    taskNote.close()
+    mutateTasks((results) => replaceTask(results, saved))
+    toast.success(
+      approved ? t("taskNote.postedApproved") : t("taskNote.posted"),
+      { description: saved.name }
+    )
   }
 
   const handleLogged = ({ target, hours, date }: QuickLogResult): void => {
@@ -944,6 +956,18 @@ export function TaskBoard({ scope }: TaskBoardProps) {
         target={quickLog.target}
         onOpenChange={(open) => !open && quickLog.close()}
         onLogged={handleLogged}
+      />
+      <TaskNoteDialog
+        open={taskNote.isOpen}
+        task={taskNote.target}
+        canApprove={
+          taskNote.target !== null &&
+          statusOptionsOf(data, taskNote.target.instanceIndex).includes(
+            "approved"
+          )
+        }
+        onOpenChange={(open) => !open && taskNote.close()}
+        onPosted={handleNotePosted}
       />
       <TaskDetailsDialog
         state={taskDetails.state}

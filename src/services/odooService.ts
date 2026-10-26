@@ -36,6 +36,7 @@ import type {
   TimesheetLookup,
   TimesheetReference,
   TimesheetSubmission,
+  PostTaskNoteRequest,
   UpdateTaskRequest,
 } from "@/types/timesheet"
 import { isPositiveInteger, isRecord } from "@/utils/guards"
@@ -408,6 +409,14 @@ export function peekMyTasks(): MyTasksInstanceResult[] | undefined {
   return odooCache.peek(MY_TASKS_KEY)
 }
 
+/** Every list showing tasks may hold the old stage or state. */
+function invalidateTaskReads(): void {
+  odooCache.invalidate(MY_TASKS_KEY.id)
+  odooCache.invalidate(TASK_SEARCH_PREFIX)
+  odooCache.invalidate(TASK_LIST_PREFIX)
+  odooCache.invalidate(PROJECT_TASKS_PREFIX)
+}
+
 /**
  * Moves a task to another stage and/or sets its state in Odoo; resolves
  * with the task as Odoo holds it afterwards. Rejects with Odoo's message
@@ -423,11 +432,24 @@ export async function updateTask(
     }
     throw new InvalidResponseError(GATEWAY_FUNCTION)
   } finally {
-    // Every list showing tasks may hold the old stage or state.
-    odooCache.invalidate(MY_TASKS_KEY.id)
-    odooCache.invalidate(TASK_SEARCH_PREFIX)
-    odooCache.invalidate(TASK_LIST_PREFIX)
-    odooCache.invalidate(PROJECT_TASKS_PREFIX)
+    invalidateTaskReads()
+  }
+}
+
+/** Posts a note in the task's chatter, and approves the task when asked. */
+export async function postTaskNote(
+  request: Omit<PostTaskNoteRequest, "action">
+): Promise<KanbanTask> {
+  try {
+    const data = await invokeGateway({ action: "POST_TASK_NOTE", ...request })
+    if (isRecord(data)) {
+      return toKanbanTask(data.task)
+    }
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  } finally {
+    if (request.approve) {
+      invalidateTaskReads()
+    }
   }
 }
 

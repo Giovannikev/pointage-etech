@@ -9,7 +9,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     environment: "node",
     // Dates are local: pin the zone so results don't depend on the machine.
     env: { TZ: "Indian/Antananarivo" },

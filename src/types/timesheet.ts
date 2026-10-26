@@ -485,6 +485,22 @@ export interface UpdateTaskResponse {
   task: KanbanTask
 }
 
+export interface PostTaskNoteRequest {
+  action: "POST_TASK_NOTE"
+  instanceIndex: OdooInstanceIndex
+  taskId: number
+  /** Plain text, posted as an internal note in the task's chatter. */
+  note: string
+  /** Also sets the task to approved, once the note is posted. */
+  approve: boolean
+}
+
+export interface PostTaskNoteResponse {
+  messageId: number
+  /** The task as Odoo holds it after the note. */
+  task: KanbanTask
+}
+
 export type GatewayRequest =
   | SearchTaskRequest
   | SubmitTimesheetRequest
@@ -500,6 +516,7 @@ export type GatewayRequest =
   | ListProjectsRequest
   | ListProjectTasksRequest
   | UpdateTaskRequest
+  | PostTaskNoteRequest
   | ListTasksRequest
   | ListAssigneesRequest
 
