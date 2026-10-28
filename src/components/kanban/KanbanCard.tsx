@@ -250,7 +250,11 @@ export function KanbanCard({
         {(showInstance || editing !== undefined) && (
           <span className="ml-auto flex min-w-0 items-center gap-1">
             {showInstance && (
-              <InstanceBadge instanceIndex={task.instanceIndex} />
+              // Shrinks first on a narrow card, so the menu stays visible.
+              <InstanceBadge
+                instanceIndex={task.instanceIndex}
+                className="min-w-0 shrink"
+              />
             )}
             {editing !== undefined && task.projectId !== null && (
               <MoveMenu task={task} editing={editing} />

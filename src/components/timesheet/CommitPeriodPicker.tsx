@@ -45,11 +45,12 @@ export function CommitPeriodPicker({
   return (
     <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-3">
-        <div className="max-w-full overflow-x-auto">
+        <div className="max-w-full">
           <ToggleGroup
             type="single"
             variant="outline"
             size="sm"
+            className="flex-wrap"
             aria-label={t("period.label")}
             value={findPreset(value) ?? ""}
             onValueChange={selectPreset}

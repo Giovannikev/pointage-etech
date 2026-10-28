@@ -144,6 +144,14 @@
     @apply font-sans;
     }
 
+  /* A grid without grid-cols-* gets one implicit "auto" column, which grows
+     to its widest content (a long code line, a row of buttons) and pushes
+     the page past a phone screen. One shrinkable column instead; grid-cols-*
+     utilities still win, being in the utilities layer. */
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+    }
+
   /* One minimal scrollbar style everywhere: a thin rounded thumb, no track,
      no arrows. Chrome and Safari use the ::-webkit-scrollbar rules; Firefox,
      which doesn't support them, uses the standard properties below. */

@@ -10,11 +10,21 @@ const INSTANCE_STYLES: Record<OdooInstanceIndex, string> = {
   2: "bg-instance-2/12 text-instance-2 dark:bg-instance-2/18",
 }
 
-function KnownInstanceBadge({ index }: { index: OdooInstanceIndex }) {
+function KnownInstanceBadge({
+  index,
+  className,
+}: {
+  index: OdooInstanceIndex
+  className?: string
+}) {
   const label = useInstanceLabel(index)
   return (
     <Badge
-      className={cn("max-w-28 font-semibold", INSTANCE_STYLES[index])}
+      className={cn(
+        "max-w-28 font-semibold",
+        INSTANCE_STYLES[index],
+        className
+      )}
       title={label}
     >
       <span className="truncate">{label}</span>
@@ -24,16 +34,23 @@ function KnownInstanceBadge({ index }: { index: OdooInstanceIndex }) {
 
 interface InstanceBadgeProps {
   instanceIndex: OdooInstanceIndex | null
+  className?: string
 }
 
-export function InstanceBadge({ instanceIndex }: InstanceBadgeProps) {
+export function InstanceBadge({
+  instanceIndex,
+  className,
+}: InstanceBadgeProps) {
   const { t } = useTranslation()
   if (instanceIndex === null) {
     return (
-      <Badge variant="outline" className="text-muted-foreground">
+      <Badge
+        variant="outline"
+        className={cn("text-muted-foreground", className)}
+      >
         {t("timesheet.notFound")}
       </Badge>
     )
   }
-  return <KnownInstanceBadge index={instanceIndex} />
+  return <KnownInstanceBadge index={instanceIndex} className={className} />
 }

@@ -81,8 +81,11 @@ export function TicketCard({
           </span>
         )}
         {showInstance && (
-          <span className="ml-auto min-w-0">
-            <InstanceBadge instanceIndex={ticket.instanceIndex} />
+          <span className="ml-auto flex min-w-0">
+            <InstanceBadge
+              instanceIndex={ticket.instanceIndex}
+              className="min-w-0 shrink"
+            />
           </span>
         )}
       </div>
