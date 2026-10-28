@@ -123,7 +123,8 @@ function RequestForm({
     () => leaveTypes.find((candidate) => typeKey(candidate) === selectedKey),
     [leaveTypes, selectedKey]
   )
-  const modes = type === undefined ? ["days"] : MODES_BY_UNIT[type.unit]
+  const modes: RequestMode[] =
+    type === undefined ? ["days"] : MODES_BY_UNIT[type.unit]
   // A mode the newly picked type doesn't offer falls back to whole days.
   const activeMode: RequestMode = modes.includes(mode) ? mode : "days"
 
