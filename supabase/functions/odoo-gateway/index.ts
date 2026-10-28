@@ -2975,8 +2975,8 @@ async function readOwnLeave(
 }
 
 /**
- * Creates a time off request for the user's own employee, which Odoo picks
- * by default; Odoo checks the balance, overlaps and the type's unit.
+ * Creates a time off request for the user's own employee; Odoo checks the
+ * balance, overlaps and the type's unit.
  */
 async function requestTimeOff(
   instances: OdooInstanceSettings[],
@@ -2984,8 +2984,19 @@ async function requestTimeOff(
 ): Promise<LeaveRequest> {
   const { instanceIndex, leaveTypeId, dateFrom, description } = request
   const session = await createSessionPool(instances)(instanceIndex)
-  const leaveFields = await getModelFields(session, "hr.leave")
+  const [leaveFields, employeeId] = await Promise.all([
+    getModelFields(session, "hr.leave"),
+    readOwnEmployeeId(session),
+  ])
+  if (employeeId === null) {
+    throw new HttpError(
+      `Your user has no employee on ${session.connection.label}.`,
+      409
+    )
+  }
   const values: Record<string, unknown> = {
+    // Odoo only fills it in its own form: an API call must send it.
+    employee_id: employeeId,
     holiday_status_id: leaveTypeId,
     request_date_from: dateFrom,
     request_date_to: request.dateTo,
