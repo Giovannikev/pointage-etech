@@ -139,13 +139,16 @@ export async function openWebSession(
     })
   } catch (error) {
     if (error instanceof OdooRpcError) {
-      throw new HttpError(needsPassword, 409)
+      throw new HttpError(`${needsPassword} Odoo: ${error.message}`, 409)
     }
     throw error
   }
   // With two-factor authentication, Odoo answers without a signed-in user.
   if (!isRecord(answer.result) || !isPositiveInteger(answer.result.uid)) {
-    throw new HttpError(needsPassword, 409)
+    throw new HttpError(
+      `${needsPassword} Odoo asked for a second authentication factor.`,
+      409
+    )
   }
   const session = answer.setCookies
     .map((cookie) => cookie.split(";")[0])
