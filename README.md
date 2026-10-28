@@ -281,8 +281,8 @@ it is kept as written. A description edited by hand is never regenerated.
 | `GET_TIME_OFF` | `instanceIndex?` | Leave types with the user's balance, and the user's requests of the last year and to come, per instance |
 | `REQUEST_TIME_OFF` | `instanceIndex`, `leaveTypeId`, `dateFrom`, `dateTo`, `period` (`am`/`pm` for a half day), `hourFrom`/`hourTo` (hours), `description` | The created request; Odoo checks the balance and overlaps |
 | `DELETE_TIME_OFF` | `instanceIndex`, `leaveId` | Deletes one of the user's requests still waiting for approval and not started |
-| `GET_ATTENDANCE` | `dateFrom`, `dateTo` (366 days max), `instanceIndex?` | The user's attendances of the period, the open check-in, and whether the API may check in and out |
-| `CHECK_IN_OUT` | `instanceIndex` | Checks in, or out when checked in; returns the open check-in |
+| `GET_ATTENDANCE` | `dateFrom`, `dateTo` (366 days max), `instanceIndex?` | The user's attendances of the period and the open check-in |
+| `CHECK_IN_OUT` | `instanceIndex` | Checks in, or out when checked in, through the API or Odoo's attendance button route; returns the open check-in |
 
 Filters are keyed per instance: `projects: ["1:12"]`, `assignees: ["2:7", "none"]`
 (`none`: nobody assigned).
@@ -330,8 +330,11 @@ has them, for the employee linked to the signed-in user: balances, requests
 and their state, new requests (full days, half day or hours, as the leave
 type allows) and the deletion of a request still waiting for approval; the
 current check-in and the hours present over a period. Checking in and out
-writes `hr.attendance`, which a plain employee may not do through the API
-(Odoo's own button runs with more rights): the page then links to Odoo.
+writes `hr.attendance` when the user has that right; otherwise the gateway
+opens a short Odoo web session and calls the route of Odoo's own attendance
+button (`/hr_attendance/systray_check_in_out`). Odoo opens web sessions with
+a password only, not an API key, and not with two-factor authentication:
+such users save their Odoo password in Settings to check in from Pointage.
 
 Validated timesheets (Odoo Timesheets app, `validated` field) are shown
 locked and can't be edited or deleted from Pointage.

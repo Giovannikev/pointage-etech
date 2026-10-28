@@ -32,11 +32,14 @@ import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
 import { noteToHtml } from "../_shared/chatterNote.ts"
 import {
+  callWebRoute,
+  closeWebSession,
   createSessionPool,
   executeKw,
   OdooRpcError,
   type OdooSession,
   readMany2one,
+  openWebSession,
   readServerMajorVersion,
 } from "../_shared/odoo.ts"
 import {
@@ -383,8 +386,6 @@ type TimeOffResult = InstanceResult<{
 type AttendanceResult = InstanceResult<{
   /** False without the Attendances app, or when the user has no employee. */
   available: boolean
-  /** The user may create and edit attendances through the API. */
-  canCheckInOut: boolean
   /** Check-in of the attendance still open; null when checked out. */
   openSince: string | null
   attendances: Attendance[]
@@ -3091,7 +3092,6 @@ function getAttendance(
     async (session) => {
       const unavailable = {
         available: false,
-        canCheckInOut: false,
         openSince: null,
         attendances: [],
         truncated: false,
@@ -3107,7 +3107,7 @@ function getAttendance(
       // keeps the check-ins of its local days.
       const from = new Date(Date.parse(`${dateFrom}T00:00:00Z`) - MS_PER_DAY)
       const to = new Date(Date.parse(`${dateTo}T00:00:00Z`) + 2 * MS_PER_DAY)
-      const [records, open, canCreate, canWrite] = await Promise.all([
+      const [records, open] = await Promise.all([
         executeKw(
           session,
           "hr.attendance",
@@ -3126,13 +3126,10 @@ function getAttendance(
           }
         ),
         readOpenAttendance(session, employeeId),
-        hasModelAccess(session, "hr.attendance", "create"),
-        hasModelAccess(session, "hr.attendance", "write"),
       ])
       const raw = readRecords(records, session, "attendance")
       return {
         available: true,
-        canCheckInOut: canCreate && canWrite,
         openSince: open?.checkIn ?? null,
         attendances: raw.flatMap((record) => readAttendance(record) ?? []),
         truncated: raw.length >= ATTENDANCE_LIMIT,
@@ -3142,9 +3139,10 @@ function getAttendance(
 }
 
 /**
- * Checks the user in, or out when an attendance is open, as Odoo's
- * attendance button does. Needs the right to create and edit attendances:
- * Odoo's own button runs with more rights than an API call.
+ * Checks the user in, or out when an attendance is open. With the right to
+ * create and edit attendances, through the API; otherwise like Odoo's own
+ * attendance button, whose route runs with more rights: it needs a web
+ * session, which Odoo opens with the user's password only.
  */
 async function checkInOut(
   instances: OdooInstanceSettings[],
@@ -3158,6 +3156,27 @@ async function checkInOut(
       409
     )
   }
+  const [canCreate, canWrite] = await Promise.all([
+    hasModelAccess(session, "hr.attendance", "create"),
+    hasModelAccess(session, "hr.attendance", "write"),
+  ])
+  if (!canCreate || !canWrite) {
+    const webSession = await openWebSession(session.connection)
+    try {
+      await asConflict(
+        callWebRoute(
+          session.connection,
+          webSession,
+          "/hr_attendance/systray_check_in_out"
+        )
+      )
+    } finally {
+      await closeWebSession(session.connection, webSession)
+    }
+    const open = await readOpenAttendance(session, employeeId)
+    return { openSince: open?.checkIn ?? null }
+  }
+
   const open = await readOpenAttendance(session, employeeId)
   if (open === null) {
     const now = odooNow()

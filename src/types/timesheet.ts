@@ -570,8 +570,6 @@ export type TimeOffInstanceResult = InstanceResult<{
 export type AttendanceInstanceResult = InstanceResult<{
   /** False without the Attendances app, or when the user has no employee. */
   available: boolean
-  /** The user may check in and out through the API. */
-  canCheckInOut: boolean
   /** Check-in of the attendance still open; null when checked out. */
   openSince: string | null
   attendances: Attendance[]

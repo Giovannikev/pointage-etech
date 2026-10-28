@@ -46,18 +46,23 @@ function readOdooErrorMessage(error: unknown): string {
   return "Odoo returned an unknown error."
 }
 
-async function postJsonRpc(
+/** Sends a JSON-RPC call; `cookie` signs it in with a web session. */
+async function sendJsonRpc(
   url: string,
   label: string,
-  params: Record<string, unknown>
-): Promise<unknown> {
+  params: Record<string, unknown>,
+  cookie?: string
+): Promise<{ result: unknown; setCookies: string[] }> {
   rpcRequestId += 1
 
   let response: Response
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(cookie === undefined ? {} : { Cookie: cookie }),
+      },
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "call",
@@ -90,7 +95,15 @@ async function postJsonRpc(
   if (payload.error !== undefined) {
     throw new OdooRpcError(readOdooErrorMessage(payload.error))
   }
-  return payload.result
+  return { result: payload.result, setCookies: response.headers.getSetCookie() }
+}
+
+async function postJsonRpc(
+  url: string,
+  label: string,
+  params: Record<string, unknown>
+): Promise<unknown> {
+  return (await sendJsonRpc(url, label, params)).result
 }
 
 function callService(
@@ -104,6 +117,70 @@ function callService(
     method,
     args,
   })
+}
+
+/**
+ * Signs in to Odoo's web client, for the routes the API doesn't offer
+ * (checking in and out). Odoo accepts only a password there: an API key
+ * works for the API alone, and two-factor authentication needs a code.
+ * Resolves with the session cookie.
+ */
+export async function openWebSession(
+  connection: OdooConnection
+): Promise<string> {
+  const { url, label, db, login, apiKey } = connection
+  const needsPassword = `${label} refused to open a session for checking in and out: save your Odoo password instead of an API key in Settings, with two-factor authentication off.`
+  let answer: { result: unknown; setCookies: string[] }
+  try {
+    answer = await sendJsonRpc(`${url}/web/session/authenticate`, label, {
+      db,
+      login,
+      password: apiKey,
+    })
+  } catch (error) {
+    if (error instanceof OdooRpcError) {
+      throw new HttpError(needsPassword, 409)
+    }
+    throw error
+  }
+  // With two-factor authentication, Odoo answers without a signed-in user.
+  if (!isRecord(answer.result) || !isPositiveInteger(answer.result.uid)) {
+    throw new HttpError(needsPassword, 409)
+  }
+  const session = answer.setCookies
+    .map((cookie) => cookie.split(";")[0])
+    .find((cookie) => cookie.startsWith("session_id="))
+  if (session === undefined) {
+    throw new HttpError(`${label} didn't open a web session.`, 502)
+  }
+  return session
+}
+
+/** Calls a JSON route of Odoo's web client with a session from openWebSession. */
+export async function callWebRoute(
+  connection: OdooConnection,
+  session: string,
+  path: string,
+  params: Record<string, unknown> = {}
+): Promise<unknown> {
+  return (
+    await sendJsonRpc(
+      `${connection.url}${path}`,
+      connection.label,
+      params,
+      session
+    )
+  ).result
+}
+
+/** Ends a session from openWebSession; a failure only leaves it to expire. */
+export async function closeWebSession(
+  connection: OdooConnection,
+  session: string
+): Promise<void> {
+  await callWebRoute(connection, session, "/web/session/destroy").catch(
+    () => undefined
+  )
 }
 
 /** Finds the database name when the server hosts a single one. */

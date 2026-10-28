@@ -1230,7 +1230,6 @@ export function fetchAttendance(
           }
           return {
             available: record.available === true,
-            canCheckInOut: record.canCheckInOut === true,
             openSince: record.openSince,
             attendances: readList(record.attendances, toAttendance),
             truncated: record.truncated === true,

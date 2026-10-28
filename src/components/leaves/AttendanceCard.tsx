@@ -1,11 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  ExternalLinkIcon,
-  Loader2Icon,
-  LogInIcon,
-  LogOutIcon,
-  RefreshCwIcon,
-} from "lucide-react"
+import { Loader2Icon, LogInIcon, LogOutIcon, RefreshCwIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -85,8 +79,16 @@ function CheckInStatus({
       )
       onChanged()
     } catch (error) {
+      // Odoo's own button still works when the gateway can't sign in.
       toast.error(t("leaves.checkInError"), {
         description: error instanceof Error ? error.message : String(error),
+        action:
+          odooUrl === undefined
+            ? undefined
+            : {
+                label: t("leaves.openOdoo"),
+                onClick: () => window.open(`${odooUrl}/odoo`, "_blank"),
+              },
       })
     } finally {
       setIsSaving(false)
@@ -117,39 +119,21 @@ function CheckInStatus({
         )}
       </div>
       {showInstance && <InstanceBadge instanceIndex={result.instanceIndex} />}
-      {result.canCheckInOut ? (
-        <Button
-          variant={isIn ? "outline" : "default"}
-          disabled={isSaving}
-          onClick={() => void toggle(result.instanceIndex)}
-          className="max-sm:w-full"
-        >
-          {isSaving ? (
-            <Loader2Icon className="animate-spin" />
-          ) : isIn ? (
-            <LogOutIcon />
-          ) : (
-            <LogInIcon />
-          )}
-          {isIn ? t("leaves.checkOut") : t("leaves.checkIn")}
-        </Button>
-      ) : (
-        odooUrl !== undefined && (
-          <div className="grid gap-1 max-sm:w-full">
-            <Button variant="outline" asChild>
-              <a href={`${odooUrl}/odoo`} target="_blank" rel="noreferrer">
-                <ExternalLinkIcon />
-                {isIn ? t("leaves.checkOutInOdoo") : t("leaves.checkInInOdoo")}
-              </a>
-            </Button>
-          </div>
-        )
-      )}
-      {!result.canCheckInOut && (
-        <p className="w-full text-xs text-muted-foreground">
-          {t("leaves.checkInOdooOnly")}
-        </p>
-      )}
+      <Button
+        variant={isIn ? "outline" : "default"}
+        disabled={isSaving}
+        onClick={() => void toggle(result.instanceIndex)}
+        className="max-sm:w-full"
+      >
+        {isSaving ? (
+          <Loader2Icon className="animate-spin" />
+        ) : isIn ? (
+          <LogOutIcon />
+        ) : (
+          <LogInIcon />
+        )}
+        {isIn ? t("leaves.checkOut") : t("leaves.checkIn")}
+      </Button>
     </div>
   )
 }
