@@ -7,6 +7,7 @@ const APP_VIEWS: readonly AppView[] = [
   "kanban",
   "tasks",
   "history",
+  "leaves",
   "settings",
 ]
 

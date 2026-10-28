@@ -10,6 +10,13 @@ import {
 } from "@/services/edgeFunctionClient"
 import type {
   AssigneesInstanceResult,
+  Attendance,
+  AttendanceInstanceResult,
+  LeaveReference,
+  LeaveRequest,
+  LeaveType,
+  TimeOffInstanceResult,
+  TimeOffSubmission,
   CommitPeriod,
   GatewayRequest,
   InstanceResult,
@@ -1045,4 +1052,212 @@ export function fetchAssignees(
 
 export function peekAssignees(): AssigneesInstanceResult[] | undefined {
   return odooCache.peek(ASSIGNEES_KEY)
+}
+
+/* ------------------------------------------------------------------ */
+/* Time off and attendance                                             */
+/* ------------------------------------------------------------------ */
+
+const TIME_OFF_KEY: CacheKey<TimeOffInstanceResult[]> = cacheKey("timeOff")
+const ATTENDANCE_PREFIX = "attendance:"
+const TIME_OFF_TTL_MS = 2 * 60_000
+
+const LEAVE_STATES = ["confirm", "refuse", "validate1", "validate", "cancel"]
+const LEAVE_UNITS = ["day", "half_day", "hour"]
+
+function isHalfDayPeriod(value: unknown): value is "am" | "pm" | null {
+  return value === null || value === "am" || value === "pm"
+}
+
+function toLeaveType(value: unknown): LeaveType {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.leaveTypeId) &&
+    typeof value.name === "string" &&
+    typeof value.unit === "string" &&
+    LEAVE_UNITS.includes(value.unit) &&
+    isNullableNumber(value.remaining) &&
+    isNullableNumber(value.allocated)
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      leaveTypeId: value.leaveTypeId,
+      name: value.name,
+      unit: value.unit as LeaveType["unit"],
+      requiresAllocation: value.requiresAllocation === true,
+      remaining: value.remaining,
+      allocated: value.allocated,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toLeaveRequest(value: unknown): LeaveRequest {
+  if (
+    isRecord(value) &&
+    isInstanceIndex(value.instanceIndex) &&
+    isPositiveInteger(value.leaveId) &&
+    isPositiveInteger(value.leaveTypeId) &&
+    typeof value.leaveTypeName === "string" &&
+    typeof value.dateFrom === "string" &&
+    typeof value.dateTo === "string" &&
+    isHalfDayPeriod(value.period) &&
+    isNullableNumber(value.hourFrom) &&
+    isNullableNumber(value.hourTo) &&
+    typeof value.days === "number" &&
+    isNullableString(value.duration) &&
+    typeof value.description === "string" &&
+    typeof value.state === "string" &&
+    LEAVE_STATES.includes(value.state)
+  ) {
+    return {
+      instanceIndex: value.instanceIndex,
+      leaveId: value.leaveId,
+      leaveTypeId: value.leaveTypeId,
+      leaveTypeName: value.leaveTypeName,
+      dateFrom: value.dateFrom,
+      dateTo: value.dateTo,
+      period: value.period,
+      hourFrom: value.hourFrom,
+      hourTo: value.hourTo,
+      days: value.days,
+      duration: value.duration,
+      description: value.description,
+      state: value.state as LeaveRequest["state"],
+      canDelete: value.canDelete === true,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toAttendance(value: unknown): Attendance {
+  if (
+    isRecord(value) &&
+    isPositiveInteger(value.attendanceId) &&
+    typeof value.checkIn === "string" &&
+    isNullableString(value.checkOut) &&
+    typeof value.workedHours === "number"
+  ) {
+    return {
+      attendanceId: value.attendanceId,
+      checkIn: value.checkIn,
+      checkOut: value.checkOut,
+      workedHours: value.workedHours,
+    }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function attendanceKey(
+  period: CommitPeriod
+): CacheKey<AttendanceInstanceResult[]> {
+  return cacheKey(`${ATTENDANCE_PREFIX}${period.from}:${period.to}`)
+}
+
+/** Leave types with their balance, and the user's requests, per instance. */
+export function fetchTimeOff(
+  options: CacheReadOptions = {}
+): Promise<TimeOffInstanceResult[]> {
+  return odooCache.getOrFetch(
+    TIME_OFF_KEY,
+    TIME_OFF_TTL_MS,
+    async () =>
+      readInstanceResults(await invokeGateway({ action: "GET_TIME_OFF" })).map(
+        (value) =>
+          toInstanceResult(value, (record) => ({
+            available: record.available === true,
+            leaveTypes: readList(record.leaveTypes, toLeaveType),
+            requests: readList(record.requests, toLeaveRequest),
+            truncated: record.truncated === true,
+          }))
+      ),
+    options
+  )
+}
+
+export function peekTimeOff(): TimeOffInstanceResult[] | undefined {
+  return odooCache.peek(TIME_OFF_KEY)
+}
+
+/** Sends a time off request to Odoo; resolves with the request as stored. */
+export async function requestTimeOff(
+  submission: TimeOffSubmission
+): Promise<LeaveRequest> {
+  try {
+    const data = await invokeGateway({
+      action: "REQUEST_TIME_OFF",
+      ...submission,
+    })
+    if (isRecord(data)) {
+      return toLeaveRequest(data.request)
+    }
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  } finally {
+    // Balances changed too.
+    odooCache.invalidate(TIME_OFF_KEY.id)
+  }
+}
+
+/** Deletes a request still waiting for approval. */
+export async function deleteTimeOff(reference: LeaveReference): Promise<void> {
+  try {
+    await invokeGateway({ action: "DELETE_TIME_OFF", ...reference })
+  } finally {
+    odooCache.invalidate(TIME_OFF_KEY.id)
+  }
+}
+
+/** The user's attendances of the period and current state, per instance. */
+export function fetchAttendance(
+  period: CommitPeriod,
+  options: CacheReadOptions = {}
+): Promise<AttendanceInstanceResult[]> {
+  return odooCache.getOrFetch(
+    attendanceKey(period),
+    TIME_OFF_TTL_MS,
+    async () =>
+      readInstanceResults(
+        await invokeGateway({
+          action: "GET_ATTENDANCE",
+          dateFrom: period.from,
+          dateTo: period.to,
+        })
+      ).map((value) =>
+        toInstanceResult(value, (record) => {
+          if (!isNullableString(record.openSince)) {
+            throw new InvalidResponseError(GATEWAY_FUNCTION)
+          }
+          return {
+            available: record.available === true,
+            canCheckInOut: record.canCheckInOut === true,
+            openSince: record.openSince,
+            attendances: readList(record.attendances, toAttendance),
+            truncated: record.truncated === true,
+          }
+        })
+      ),
+    options
+  )
+}
+
+export function peekAttendance(
+  period: CommitPeriod
+): AttendanceInstanceResult[] | undefined {
+  return odooCache.peek(attendanceKey(period))
+}
+
+/** Checks in, or out when checked in; resolves with the new open check-in. */
+export async function checkInOut(
+  instanceIndex: OdooInstanceIndex
+): Promise<string | null> {
+  try {
+    const data = await invokeGateway({ action: "CHECK_IN_OUT", instanceIndex })
+    if (isRecord(data) && isNullableString(data.openSince)) {
+      return data.openSince
+    }
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  } finally {
+    odooCache.invalidate(ATTENDANCE_PREFIX)
+  }
 }

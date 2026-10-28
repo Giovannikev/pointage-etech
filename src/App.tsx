@@ -41,6 +41,11 @@ const HistoryPage = lazy(() =>
     default: module.HistoryPage,
   }))
 )
+const LeavesPage = lazy(() =>
+  import("@/pages/leaves/LeavesPage").then((module) => ({
+    default: module.LeavesPage,
+  }))
+)
 const SettingsPage = lazy(() =>
   import("@/pages/settings/SettingsPage").then((module) => ({
     default: module.SettingsPage,
@@ -91,6 +96,8 @@ function Workspace({ userEmail }: { userEmail: string }) {
         return <TasksPage onOpenSettings={openSettings} />
       case "history":
         return <HistoryPage onOpenSettings={openSettings} />
+      case "leaves":
+        return <LeavesPage onOpenSettings={openSettings} />
       case "settings":
         return <SettingsPage userEmail={userEmail} />
     }

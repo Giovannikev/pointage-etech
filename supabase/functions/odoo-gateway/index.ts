@@ -20,6 +20,11 @@
  *   { action: "LIST_PROJECT_TASKS", instanceIndex, projectId, query? }
  *   { action: "UPDATE_TASK", instanceIndex, taskId, stageId?, status? }
  *   { action: "POST_TASK_NOTE", instanceIndex, taskId, note, approve }
+ *   { action: "GET_TIME_OFF", instanceIndex? }
+ *   { action: "REQUEST_TIME_OFF", instanceIndex, leaveTypeId, dateFrom, dateTo, period, hourFrom, hourTo, description }
+ *   { action: "DELETE_TIME_OFF", instanceIndex, leaveId }
+ *   { action: "GET_ATTENDANCE", dateFrom, dateTo, instanceIndex? }
+ *   { action: "CHECK_IN_OUT", instanceIndex }
  *   { action: "LIST_TASKS", query?, projects?, assignees?, includeClosed, instanceIndex? }
  *   { action: "LIST_ASSIGNEES", instanceIndex? }
  */
@@ -308,6 +313,84 @@ interface TaskNote {
   approve: boolean
 }
 
+type LeaveState = "confirm" | "refuse" | "validate1" | "validate" | "cancel"
+type LeaveUnit = "day" | "half_day" | "hour"
+
+interface LeaveType {
+  instanceIndex: InstanceIndex
+  leaveTypeId: number
+  name: string
+  /** What a request of this type counts: days, half days or hours. */
+  unit: LeaveUnit
+  requiresAllocation: boolean
+  /** Days (or hours) left, pending requests deducted; null without allocation. */
+  remaining: number | null
+  allocated: number | null
+}
+
+interface LeaveRequest {
+  instanceIndex: InstanceIndex
+  leaveId: number
+  leaveTypeId: number
+  leaveTypeName: string
+  dateFrom: string
+  dateTo: string
+  /** Half-day requests: the morning or the afternoon. */
+  period: "am" | "pm" | null
+  /** Hour requests: the hours of the day, 9.5 for 09:30. */
+  hourFrom: number | null
+  hourTo: number | null
+  days: number
+  /** Odoo's own label, "2 days" or "3 hours". */
+  duration: string | null
+  description: string
+  state: LeaveState
+  canDelete: boolean
+}
+
+interface LeaveReference {
+  instanceIndex: InstanceIndex
+  leaveId: number
+}
+
+interface TimeOffRequest {
+  instanceIndex: InstanceIndex
+  leaveTypeId: number
+  dateFrom: string
+  dateTo: string
+  period: "am" | "pm" | null
+  hourFrom: number | null
+  hourTo: number | null
+  description: string
+}
+
+interface Attendance {
+  attendanceId: number
+  /** ISO timestamps, UTC. */
+  checkIn: string
+  checkOut: string | null
+  workedHours: number
+}
+
+type TimeOffResult = InstanceResult<{
+  /** False without the Time Off app, or when the user has no employee. */
+  available: boolean
+  leaveTypes: LeaveType[]
+  requests: LeaveRequest[]
+  truncated: boolean
+}>
+
+type AttendanceResult = InstanceResult<{
+  /** False without the Attendances app, or when the user has no employee. */
+  available: boolean
+  /** The user may create and edit attendances through the API. */
+  canCheckInOut: boolean
+  /** Check-in of the attendance still open; null when checked out. */
+  openSince: string | null
+  attendances: Attendance[]
+  truncated: boolean
+}>
+
 interface HistoryQuery {
   dateFrom: string
   dateTo: string
@@ -334,6 +417,11 @@ type GatewayRequest =
   | ({ action: "LIST_PROJECT_TASKS" } & ProjectTaskQuery)
   | ({ action: "UPDATE_TASK" } & TaskUpdate)
   | ({ action: "POST_TASK_NOTE" } & TaskNote)
+  | { action: "GET_TIME_OFF"; instanceIndex: InstanceIndex | null }
+  | ({ action: "REQUEST_TIME_OFF" } & TimeOffRequest)
+  | ({ action: "DELETE_TIME_OFF" } & LeaveReference)
+  | ({ action: "GET_ATTENDANCE" } & HistoryQuery)
+  | { action: "CHECK_IN_OUT"; instanceIndex: InstanceIndex }
   | ({ action: "LIST_TASKS" } & TaskListQuery)
   | { action: "LIST_ASSIGNEES"; instanceIndex: InstanceIndex | null }
 
@@ -348,6 +436,9 @@ const TIMESHEET_LOOKUP_LIMIT = 2_000
 const MAX_TASK_REF_LENGTH = 64
 const MAX_DESCRIPTION_LENGTH = 2_000
 const MAX_NOTE_LENGTH = 20_000
+const LEAVE_LIST_LIMIT = 500
+const ATTENDANCE_LIMIT = 1_000
+const MAX_LEAVE_DAYS = 366
 const TASK_CANDIDATE_LIMIT = 20
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 const MY_TASKS_LIMIT = 1_000
@@ -498,6 +589,74 @@ function parseHistoryQuery(body: Record<string, unknown>): HistoryQuery {
     dateFrom,
     dateTo,
     instanceIndex: readOptionalInstance(body.instanceIndex),
+  }
+}
+
+/** An hour of the day as Odoo stores it: 9.5 for 09:30. */
+function isHourOfDay(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 24
+  )
+}
+
+function parseTimeOffRequest(body: Record<string, unknown>): TimeOffRequest {
+  const { instanceIndex, leaveTypeId, dateFrom, dateTo, period } = body
+  if (!isInstanceIndex(instanceIndex) || !isPositiveInteger(leaveTypeId)) {
+    throw new HttpError('"instanceIndex" and "leaveTypeId" are required.', 400)
+  }
+  if (!isIsoDate(dateFrom) || !isIsoDate(dateTo) || dateTo < dateFrom) {
+    throw new HttpError(
+      '"dateFrom" and "dateTo" must be dates (YYYY-MM-DD), in order.',
+      400
+    )
+  }
+  const days =
+    (Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) /
+      MS_PER_DAY +
+    1
+  if (days > MAX_LEAVE_DAYS) {
+    throw new HttpError(`A request lasts at most ${MAX_LEAVE_DAYS} days.`, 400)
+  }
+  if (
+    period !== undefined &&
+    period !== null &&
+    period !== "am" &&
+    period !== "pm"
+  ) {
+    throw new HttpError('"period" must be "am", "pm" or null.', 400)
+  }
+  const hasHours = body.hourFrom !== undefined && body.hourFrom !== null
+  if (
+    hasHours &&
+    (!isHourOfDay(body.hourFrom) ||
+      !isHourOfDay(body.hourTo) ||
+      body.hourTo <= body.hourFrom)
+  ) {
+    throw new HttpError(
+      '"hourFrom" and "hourTo" must be hours of the day (0 to 24), in order.',
+      400
+    )
+  }
+  const description =
+    typeof body.description === "string" ? body.description.trim() : ""
+  if (description.length > MAX_DESCRIPTION_LENGTH) {
+    throw new HttpError(
+      `"description" is limited to ${MAX_DESCRIPTION_LENGTH} characters.`,
+      400
+    )
+  }
+  return {
+    instanceIndex,
+    leaveTypeId,
+    dateFrom,
+    dateTo,
+    period: period === "am" || period === "pm" ? period : null,
+    hourFrom: hasHours ? (body.hourFrom as number) : null,
+    hourTo: hasHours ? (body.hourTo as number) : null,
+    description,
   }
 }
 
@@ -652,6 +811,42 @@ function parseRequest(body: unknown): GatewayRequest {
     }
   }
 
+  if (body.action === "GET_TIME_OFF") {
+    return {
+      action: "GET_TIME_OFF",
+      instanceIndex: readOptionalInstance(body.instanceIndex),
+    }
+  }
+
+  if (body.action === "REQUEST_TIME_OFF") {
+    return { action: "REQUEST_TIME_OFF", ...parseTimeOffRequest(body) }
+  }
+
+  if (body.action === "DELETE_TIME_OFF") {
+    if (
+      !isInstanceIndex(body.instanceIndex) ||
+      !isPositiveInteger(body.leaveId)
+    ) {
+      throw new HttpError('"instanceIndex" and "leaveId" are required.', 400)
+    }
+    return {
+      action: "DELETE_TIME_OFF",
+      instanceIndex: body.instanceIndex,
+      leaveId: body.leaveId,
+    }
+  }
+
+  if (body.action === "GET_ATTENDANCE") {
+    return { action: "GET_ATTENDANCE", ...parseHistoryQuery(body) }
+  }
+
+  if (body.action === "CHECK_IN_OUT") {
+    if (!isInstanceIndex(body.instanceIndex)) {
+      throw new HttpError('"instanceIndex" is required.', 400)
+    }
+    return { action: "CHECK_IN_OUT", instanceIndex: body.instanceIndex }
+  }
+
   if (body.action === "FIND_TIMESHEETS") {
     const lookups = readBatch(
       body.lookups,
@@ -788,7 +983,7 @@ function parseRequest(body: unknown): GatewayRequest {
   }
 
   throw new HttpError(
-    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS", "UPDATE_TASK", "POST_TASK_NOTE", "LIST_TASKS" or "LIST_ASSIGNEES".',
+    'Unknown action. Use "SEARCH_TASK", "SUBMIT_TIMESHEET", "FIND_TIMESHEETS", "GET_TASK", "GET_MY_TASKS", "GET_TIMESHEET_HISTORY", "UPDATE_TIMESHEET", "DELETE_TIMESHEET", "SEARCH_TASKS", "SEARCH_TICKETS", "LOG_TICKET_TIME", "LIST_PROJECTS", "LIST_PROJECT_TASKS", "UPDATE_TASK", "POST_TASK_NOTE", "LIST_TASKS", "LIST_ASSIGNEES", "GET_TIME_OFF", "REQUEST_TIME_OFF", "DELETE_TIME_OFF", "GET_ATTENDANCE" or "CHECK_IN_OUT".',
     400
   )
 }
@@ -2462,6 +2657,516 @@ function listAssignees(
 }
 
 /* ------------------------------------------------------------------ */
+/* Time off (hr_holidays) and attendance (hr_attendance)               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads the fields of a model of an optional Odoo app; null when the app
+ * isn't installed ("Object hr.leave doesn't exist").
+ */
+async function optionalModelFields(
+  session: OdooSession,
+  model: string
+): Promise<Set<string> | null> {
+  try {
+    return await getModelFields(session, model)
+  } catch (error) {
+    if (error instanceof OdooRpcError) {
+      return null
+    }
+    throw error
+  }
+}
+
+/** The signed-in user's employee on this instance; null without one. */
+async function readOwnEmployeeId(session: OdooSession): Promise<number | null> {
+  const records = await executeKw(
+    session,
+    "res.users",
+    "read",
+    [[session.uid]],
+    { fields: ["employee_id"] }
+  )
+  const record = Array.isArray(records) ? records[0] : undefined
+  return isRecord(record)
+    ? (readMany2one(record.employee_id)?.id ?? null)
+    : null
+}
+
+/**
+ * True when the user's access rights allow `operation` on the model:
+ * has_access from Odoo 18, check_access_rights before.
+ */
+async function hasModelAccess(
+  session: OdooSession,
+  model: string,
+  operation: "create" | "write"
+): Promise<boolean> {
+  try {
+    return (
+      (await executeKw(session, model, "has_access", [[], operation])) === true
+    )
+  } catch (error) {
+    if (!(error instanceof OdooRpcError)) throw error
+  }
+  try {
+    return (
+      (await executeKw(session, model, "check_access_rights", [operation], {
+        raise_exception: false,
+      })) === true
+    )
+  } catch (error) {
+    if (error instanceof OdooRpcError) return false
+    throw error
+  }
+}
+
+/** Current UTC time as an Odoo datetime, "YYYY-MM-DD HH:MM:SS". */
+function odooNow(): string {
+  return new Date().toISOString().slice(0, 19).replace("T", " ")
+}
+
+const LEAVE_STATES: readonly LeaveState[] = [
+  "confirm",
+  "refuse",
+  "validate1",
+  "validate",
+  "cancel",
+]
+const LEAVE_UNITS: readonly LeaveUnit[] = ["day", "half_day", "hour"]
+const LEAVE_FIELDS = [
+  "id",
+  "holiday_status_id",
+  "request_date_from",
+  "request_date_to",
+  "request_unit_half",
+  "request_unit_hours",
+  "request_date_from_period",
+  "request_date_to_period",
+  "request_hour_from",
+  "request_hour_to",
+  "name",
+  "state",
+  "number_of_days",
+  "duration_display",
+]
+/** Requests shown: those ending in the last year, and every future one. */
+const LEAVE_HISTORY_DAYS = 366
+
+function readLeaveRequest(
+  record: unknown,
+  instanceIndex: InstanceIndex,
+  today: string
+): LeaveRequest | null {
+  if (!isRecord(record) || !isPositiveInteger(record.id)) {
+    return null
+  }
+  const type = readMany2one(record.holiday_status_id)
+  const dateFrom = readDate(record.request_date_from)
+  const dateTo = readDate(record.request_date_to)
+  const state = LEAVE_STATES.find((value) => value === record.state)
+  if (type === null || dateFrom === null || dateTo === null || !state) {
+    return null
+  }
+  const isHours = record.request_unit_hours === true
+  const fromPeriod = record.request_date_from_period
+  // From Odoo 18, a half-day request may run from a morning to an
+  // afternoon: only a single half day gets a period.
+  const isSingleHalfDay =
+    record.request_unit_half === true &&
+    dateFrom === dateTo &&
+    (record.request_date_to_period === undefined ||
+      record.request_date_to_period === fromPeriod)
+  const period =
+    isSingleHalfDay && (fromPeriod === "am" || fromPeriod === "pm")
+      ? fromPeriod
+      : null
+  return {
+    instanceIndex,
+    leaveId: record.id,
+    leaveTypeId: type.id,
+    leaveTypeName: type.name,
+    dateFrom,
+    dateTo,
+    period,
+    hourFrom: isHours ? readNumber(record.request_hour_from) : null,
+    hourTo: isHours ? readNumber(record.request_hour_to) : null,
+    days: readNumber(record.number_of_days) ?? 0,
+    duration:
+      typeof record.duration_display === "string"
+        ? record.duration_display
+        : null,
+    description: typeof record.name === "string" ? record.name : "",
+    state,
+    // Odoo lets an employee delete a request only before it is approved
+    // and before it starts.
+    canDelete:
+      (state === "confirm" || state === "validate1") && dateFrom >= today,
+  }
+}
+
+/** Remaining days (or hours) per leave type, as Odoo's dashboard shows them. */
+async function readLeaveBalances(
+  session: OdooSession
+): Promise<Map<number, Record<string, unknown>>> {
+  const balances = new Map<number, Record<string, unknown>>()
+  // get_allocation_data_request from Odoo 17, get_days_all_request before.
+  for (const method of [
+    "get_allocation_data_request",
+    "get_days_all_request",
+  ]) {
+    let rows: unknown
+    try {
+      rows = await executeKw(session, "hr.leave.type", method, [])
+    } catch (error) {
+      if (error instanceof OdooRpcError) continue
+      throw error
+    }
+    // Each row: [name, {remaining_leaves, max_leaves, ...}, requires_allocation, id]
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (Array.isArray(row) && isRecord(row[1]) && isPositiveInteger(row[3])) {
+        balances.set(row[3], row[1])
+      }
+    }
+    return balances
+  }
+  return balances
+}
+
+/** requires_allocation is a boolean from Odoo 18, "yes"/"no" before. */
+function requiresAllocation(value: unknown): boolean {
+  return value === true || value === "yes"
+}
+
+async function readLeaveTypes(
+  session: OdooSession,
+  instanceIndex: InstanceIndex
+): Promise<LeaveType[]> {
+  const available = await getModelFields(session, "hr.leave.type")
+  const fields = [
+    "id",
+    "name",
+    "requires_allocation",
+    "request_unit",
+    "has_valid_allocation",
+  ].filter((field) => available.has(field))
+  const [records, balances] = await Promise.all([
+    executeKw(session, "hr.leave.type", "search_read", [[]], {
+      fields,
+      order: available.has("sequence") ? "sequence, name" : "name",
+    }),
+    readLeaveBalances(session),
+  ])
+  return readRecords(records, session, "leave type").flatMap(
+    (record): LeaveType[] => {
+      if (
+        !isRecord(record) ||
+        !isPositiveInteger(record.id) ||
+        typeof record.name !== "string"
+      ) {
+        return []
+      }
+      const needsAllocation = requiresAllocation(record.requires_allocation)
+      // A type that needs an allocation can't be requested without one.
+      if (needsAllocation && record.has_valid_allocation === false) {
+        return []
+      }
+      const balance = balances.get(record.id)
+      const unit =
+        LEAVE_UNITS.find((value) => value === record.request_unit) ?? "day"
+      return [
+        {
+          instanceIndex,
+          leaveTypeId: record.id,
+          name: record.name,
+          unit,
+          requiresAllocation: needsAllocation,
+          remaining: needsAllocation
+            ? readNumber(balance?.virtual_remaining_leaves)
+            : null,
+          allocated: needsAllocation ? readNumber(balance?.max_leaves) : null,
+        },
+      ]
+    }
+  )
+}
+
+function getTimeOff(
+  instances: OdooInstanceSettings[],
+  instanceIndex: InstanceIndex | null
+): Promise<TimeOffResult[]> {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session, index) => {
+      const leaveFields = await optionalModelFields(session, "hr.leave")
+      if (leaveFields === null || (await readOwnEmployeeId(session)) === null) {
+        return {
+          available: false,
+          leaveTypes: [],
+          requests: [],
+          truncated: false,
+        }
+      }
+      const today = new Date().toISOString().slice(0, 10)
+      const since = new Date(Date.now() - LEAVE_HISTORY_DAYS * MS_PER_DAY)
+        .toISOString()
+        .slice(0, 10)
+      const [leaveTypes, records] = await Promise.all([
+        readLeaveTypes(session, index),
+        executeKw(
+          session,
+          "hr.leave",
+          "search_read",
+          [
+            [
+              ["user_id", "=", session.uid],
+              ["request_date_to", ">=", since],
+            ],
+          ],
+          {
+            fields: LEAVE_FIELDS.filter((field) => leaveFields.has(field)),
+            limit: LEAVE_LIST_LIMIT,
+            order: "request_date_from desc, id desc",
+          }
+        ),
+      ])
+      const raw = readRecords(records, session, "time off")
+      return {
+        available: true,
+        leaveTypes,
+        requests: raw.flatMap(
+          (record) => readLeaveRequest(record, index, today) ?? []
+        ),
+        truncated: raw.length >= LEAVE_LIST_LIMIT,
+      }
+    }
+  )
+}
+
+async function readOwnLeave(
+  session: OdooSession,
+  instanceIndex: InstanceIndex,
+  leaveId: number
+): Promise<LeaveRequest> {
+  const leaveFields = await getModelFields(session, "hr.leave")
+  const records = await executeKw(
+    session,
+    "hr.leave",
+    "search_read",
+    [
+      [
+        ["id", "=", leaveId],
+        ["user_id", "=", session.uid],
+      ],
+    ],
+    { fields: LEAVE_FIELDS.filter((field) => leaveFields.has(field)) }
+  )
+  const today = new Date().toISOString().slice(0, 10)
+  const leave = readLeaveRequest(
+    Array.isArray(records) ? records[0] : undefined,
+    instanceIndex,
+    today
+  )
+  if (leave === null) {
+    throw new HttpError("This time off request can't be read in Odoo.", 404)
+  }
+  return leave
+}
+
+/**
+ * Creates a time off request for the user's own employee, which Odoo picks
+ * by default; Odoo checks the balance, overlaps and the type's unit.
+ */
+async function requestTimeOff(
+  instances: OdooInstanceSettings[],
+  request: TimeOffRequest
+): Promise<LeaveRequest> {
+  const { instanceIndex, leaveTypeId, dateFrom, description } = request
+  const session = await createSessionPool(instances)(instanceIndex)
+  const leaveFields = await getModelFields(session, "hr.leave")
+  const values: Record<string, unknown> = {
+    holiday_status_id: leaveTypeId,
+    request_date_from: dateFrom,
+    request_date_to: request.dateTo,
+    name: description,
+  }
+  if (request.period !== null) {
+    values.request_unit_half = true
+    values.request_date_from_period = request.period
+    values.request_date_to = dateFrom
+    if (leaveFields.has("request_date_to_period")) {
+      values.request_date_to_period = request.period
+    }
+  } else if (request.hourFrom !== null && request.hourTo !== null) {
+    values.request_unit_hours = true
+    values.request_hour_from = request.hourFrom
+    values.request_hour_to = request.hourTo
+    values.request_date_to = dateFrom
+  }
+  const created = await asConflict(
+    executeKw(session, "hr.leave", "create", [values])
+  )
+  const leaveId = Array.isArray(created) ? created[0] : created
+  if (!isPositiveInteger(leaveId)) {
+    throw new HttpError("Odoo didn't confirm the time off request.", 502)
+  }
+  return readOwnLeave(session, instanceIndex, leaveId)
+}
+
+/** Deletes one of the user's requests that isn't approved yet. */
+async function deleteTimeOff(
+  instances: OdooInstanceSettings[],
+  { instanceIndex, leaveId }: LeaveReference
+): Promise<LeaveReference> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  const leave = await readOwnLeave(session, instanceIndex, leaveId)
+  if (!leave.canDelete) {
+    throw new HttpError(
+      "Only requests waiting for approval and not started yet can be deleted.",
+      409
+    )
+  }
+  await asConflict(executeKw(session, "hr.leave", "unlink", [[leaveId]]))
+  return { instanceIndex, leaveId }
+}
+
+const ATTENDANCE_FIELDS = ["id", "check_in", "check_out", "worked_hours"]
+
+function readAttendance(record: unknown): Attendance | null {
+  if (!isRecord(record) || !isPositiveInteger(record.id)) {
+    return null
+  }
+  // readDeadline turns Odoo's UTC datetimes into ISO timestamps.
+  const checkIn = readDeadline(record.check_in)
+  if (checkIn === null) {
+    return null
+  }
+  return {
+    attendanceId: record.id,
+    checkIn,
+    checkOut: readDeadline(record.check_out),
+    workedHours: readNumber(record.worked_hours) ?? 0,
+  }
+}
+
+/** The user's attendance still open (checked in, not out yet). */
+async function readOpenAttendance(
+  session: OdooSession,
+  employeeId: number
+): Promise<Attendance | null> {
+  const records = await executeKw(
+    session,
+    "hr.attendance",
+    "search_read",
+    [
+      [
+        ["employee_id", "=", employeeId],
+        ["check_out", "=", false],
+      ],
+    ],
+    { fields: ATTENDANCE_FIELDS, limit: 1, order: "check_in desc" }
+  )
+  return readAttendance(Array.isArray(records) ? records[0] : undefined)
+}
+
+function getAttendance(
+  instances: OdooInstanceSettings[],
+  { dateFrom, dateTo, instanceIndex }: HistoryQuery
+): Promise<AttendanceResult[]> {
+  return readEachInstance(
+    instances,
+    selectInstances(instances, instanceIndex),
+    async (session) => {
+      const unavailable = {
+        available: false,
+        canCheckInOut: false,
+        openSince: null,
+        attendances: [],
+        truncated: false,
+      }
+      if ((await optionalModelFields(session, "hr.attendance")) === null) {
+        return unavailable
+      }
+      const employeeId = await readOwnEmployeeId(session)
+      if (employeeId === null) {
+        return unavailable
+      }
+      // The period's days in UTC, widened by a day on each side: the page
+      // keeps the check-ins of its local days.
+      const from = new Date(Date.parse(`${dateFrom}T00:00:00Z`) - MS_PER_DAY)
+      const to = new Date(Date.parse(`${dateTo}T00:00:00Z`) + 2 * MS_PER_DAY)
+      const [records, open, canCreate, canWrite] = await Promise.all([
+        executeKw(
+          session,
+          "hr.attendance",
+          "search_read",
+          [
+            [
+              ["employee_id", "=", employeeId],
+              ["check_in", ">=", from.toISOString().slice(0, 10)],
+              ["check_in", "<", to.toISOString().slice(0, 10)],
+            ],
+          ],
+          {
+            fields: ATTENDANCE_FIELDS,
+            limit: ATTENDANCE_LIMIT,
+            order: "check_in desc",
+          }
+        ),
+        readOpenAttendance(session, employeeId),
+        hasModelAccess(session, "hr.attendance", "create"),
+        hasModelAccess(session, "hr.attendance", "write"),
+      ])
+      const raw = readRecords(records, session, "attendance")
+      return {
+        available: true,
+        canCheckInOut: canCreate && canWrite,
+        openSince: open?.checkIn ?? null,
+        attendances: raw.flatMap((record) => readAttendance(record) ?? []),
+        truncated: raw.length >= ATTENDANCE_LIMIT,
+      }
+    }
+  )
+}
+
+/**
+ * Checks the user in, or out when an attendance is open, as Odoo's
+ * attendance button does. Needs the right to create and edit attendances:
+ * Odoo's own button runs with more rights than an API call.
+ */
+async function checkInOut(
+  instances: OdooInstanceSettings[],
+  instanceIndex: InstanceIndex
+): Promise<{ openSince: string | null }> {
+  const session = await createSessionPool(instances)(instanceIndex)
+  const employeeId = await readOwnEmployeeId(session)
+  if (employeeId === null) {
+    throw new HttpError(
+      `Your user has no employee on ${session.connection.label}.`,
+      409
+    )
+  }
+  const open = await readOpenAttendance(session, employeeId)
+  if (open === null) {
+    const now = odooNow()
+    await asConflict(
+      executeKw(session, "hr.attendance", "create", [
+        { employee_id: employeeId, check_in: now },
+      ])
+    )
+    return { openSince: readDeadline(now) }
+  }
+  await asConflict(
+    executeKw(session, "hr.attendance", "write", [
+      [open.attendanceId],
+      { check_out: odooNow() },
+    ])
+  )
+  return { openSince: null }
+}
+
+/* ------------------------------------------------------------------ */
 /* HTTP handler                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -2516,6 +3221,18 @@ serveJson("odoo-gateway", {
         return { task: await updateTask(instances, gatewayRequest) }
       case "POST_TASK_NOTE":
         return await postTaskNote(instances, gatewayRequest)
+      case "GET_TIME_OFF":
+        return {
+          instances: await getTimeOff(instances, gatewayRequest.instanceIndex),
+        }
+      case "REQUEST_TIME_OFF":
+        return { request: await requestTimeOff(instances, gatewayRequest) }
+      case "DELETE_TIME_OFF":
+        return { deleted: await deleteTimeOff(instances, gatewayRequest) }
+      case "GET_ATTENDANCE":
+        return { instances: await getAttendance(instances, gatewayRequest) }
+      case "CHECK_IN_OUT":
+        return await checkInOut(instances, gatewayRequest.instanceIndex)
       case "LIST_TASKS":
         return { instances: await listTasks(instances, gatewayRequest) }
       case "LIST_ASSIGNEES":

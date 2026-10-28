@@ -495,6 +495,114 @@ export interface PostTaskNoteRequest {
   approve: boolean
 }
 
+/* Time off (Odoo Time Off app) and attendance (Odoo Attendances app) */
+
+export type LeaveState =
+  "confirm" | "refuse" | "validate1" | "validate" | "cancel"
+export type LeaveUnit = "day" | "half_day" | "hour"
+export type HalfDayPeriod = "am" | "pm"
+
+export interface LeaveType {
+  instanceIndex: OdooInstanceIndex
+  leaveTypeId: number
+  name: string
+  /** What a request of this type counts: days, half days or hours. */
+  unit: LeaveUnit
+  requiresAllocation: boolean
+  /** Days (or hours) left, pending requests deducted; null without allocation. */
+  remaining: number | null
+  allocated: number | null
+}
+
+export interface LeaveRequest {
+  instanceIndex: OdooInstanceIndex
+  leaveId: number
+  leaveTypeId: number
+  leaveTypeName: string
+  dateFrom: string
+  dateTo: string
+  /** Half-day requests: the morning or the afternoon. */
+  period: HalfDayPeriod | null
+  /** Hour requests: hours of the day, 9.5 for 09:30. */
+  hourFrom: number | null
+  hourTo: number | null
+  days: number
+  /** Odoo's own label, "2 jours" or "3 heures". */
+  duration: string | null
+  description: string
+  state: LeaveState
+  /** Waiting for approval and not started yet. */
+  canDelete: boolean
+}
+
+export interface LeaveReference {
+  instanceIndex: OdooInstanceIndex
+  leaveId: number
+}
+
+export interface TimeOffSubmission {
+  instanceIndex: OdooInstanceIndex
+  leaveTypeId: number
+  dateFrom: string
+  dateTo: string
+  period: HalfDayPeriod | null
+  hourFrom: number | null
+  hourTo: number | null
+  description: string
+}
+
+export interface Attendance {
+  attendanceId: number
+  /** ISO timestamps, UTC. */
+  checkIn: string
+  checkOut: string | null
+  workedHours: number
+}
+
+export type TimeOffInstanceResult = InstanceResult<{
+  /** False without the Time Off app, or when the user has no employee. */
+  available: boolean
+  leaveTypes: LeaveType[]
+  requests: LeaveRequest[]
+  truncated: boolean
+}>
+
+export type AttendanceInstanceResult = InstanceResult<{
+  /** False without the Attendances app, or when the user has no employee. */
+  available: boolean
+  /** The user may check in and out through the API. */
+  canCheckInOut: boolean
+  /** Check-in of the attendance still open; null when checked out. */
+  openSince: string | null
+  attendances: Attendance[]
+  truncated: boolean
+}>
+
+export interface GetTimeOffRequest {
+  action: "GET_TIME_OFF"
+  instanceIndex?: OdooInstanceIndex
+}
+
+export type RequestTimeOffRequest = {
+  action: "REQUEST_TIME_OFF"
+} & TimeOffSubmission
+
+export type DeleteTimeOffRequest = {
+  action: "DELETE_TIME_OFF"
+} & LeaveReference
+
+export interface GetAttendanceRequest {
+  action: "GET_ATTENDANCE"
+  dateFrom: string
+  dateTo: string
+  instanceIndex?: OdooInstanceIndex
+}
+
+export interface CheckInOutRequest {
+  action: "CHECK_IN_OUT"
+  instanceIndex: OdooInstanceIndex
+}
+
 export interface PostTaskNoteResponse {
   messageId: number
   /** The task as Odoo holds it after the note. */
@@ -517,6 +625,11 @@ export type GatewayRequest =
   | ListProjectTasksRequest
   | UpdateTaskRequest
   | PostTaskNoteRequest
+  | GetTimeOffRequest
+  | RequestTimeOffRequest
+  | DeleteTimeOffRequest
+  | GetAttendanceRequest
+  | CheckInOutRequest
   | ListTasksRequest
   | ListAssigneesRequest
 

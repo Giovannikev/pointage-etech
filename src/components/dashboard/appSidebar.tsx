@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react"
 import {
+  CalendarDaysIcon,
   ClockIcon,
   HistoryIcon,
   KeyRoundIcon,
@@ -61,6 +62,7 @@ export function AppSidebar({
     { view: "kanban", title: t("nav.kanban"), icon: UserRoundCheckIcon },
     { view: "tasks", title: t("nav.tasks"), icon: ListTodoIcon },
     { view: "history", title: t("nav.history"), icon: HistoryIcon },
+    { view: "leaves", title: t("nav.leaves"), icon: CalendarDaysIcon },
     { view: "settings", title: t("nav.settings"), icon: SettingsIcon },
   ]
   const navSecondary: NavSecondaryItem[] = [

@@ -278,6 +278,11 @@ it is kept as written. A description edited by hand is never regenerated.
 | `LIST_TASKS` | `query?`, `projects?`, `assignees?` (at least one), `includeClosed`, `instanceIndex?` | Any active task with a project, assigned to anyone, with its stages (500 max per instance) |
 | `LIST_ASSIGNEES` | `instanceIndex?` | The internal users of each instance, and the signed-in user's id there |
 | `POST_TASK_NOTE` | `instanceIndex`, `taskId`, `note` (plain text, 20,000 chars max), `approve` | Posts an internal note in the task chatter (_Log note_), then sets the task to approved when `approve` is true; returns the message id and the task |
+| `GET_TIME_OFF` | `instanceIndex?` | Leave types with the user's balance, and the user's requests of the last year and to come, per instance |
+| `REQUEST_TIME_OFF` | `instanceIndex`, `leaveTypeId`, `dateFrom`, `dateTo`, `period` (`am`/`pm` for a half day), `hourFrom`/`hourTo` (hours), `description` | The created request; Odoo checks the balance and overlaps |
+| `DELETE_TIME_OFF` | `instanceIndex`, `leaveId` | Deletes one of the user's requests still waiting for approval and not started |
+| `GET_ATTENDANCE` | `dateFrom`, `dateTo` (366 days max), `instanceIndex?` | The user's attendances of the period, the open check-in, and whether the API may check in and out |
+| `CHECK_IN_OUT` | `instanceIndex` | Checks in, or out when checked in; returns the open check-in |
 
 Filters are keyed per instance: `projects: ["1:12"]`, `assignees: ["2:7", "none"]`
 (`none`: nobody assigned).
@@ -318,6 +323,15 @@ hour.
 The **⋮** menu of a card on both boards has **Log note**: it posts a plain
 text note in the task chatter as an internal note, keeping its lines and
 indentation, and can set the task to _Approved_ in the same step.
+
+**Time off & attendance** (`#leaves`) reads the Odoo Time Off
+(`hr.leave`) and Attendances (`hr.attendance`) apps of each instance that
+has them, for the employee linked to the signed-in user: balances, requests
+and their state, new requests (full days, half day or hours, as the leave
+type allows) and the deletion of a request still waiting for approval; the
+current check-in and the hours present over a period. Checking in and out
+writes `hr.attendance`, which a plain employee may not do through the API
+(Odoo's own button runs with more rights): the page then links to Odoo.
 
 Validated timesheets (Odoo Timesheets app, `validated` field) are shown
 locked and can't be edited or deleted from Pointage.

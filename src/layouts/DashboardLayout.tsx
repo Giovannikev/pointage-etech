@@ -11,6 +11,7 @@ const VIEW_TITLE_KEYS = {
   kanban: "nav.kanban",
   tasks: "nav.tasks",
   history: "nav.history",
+  leaves: "nav.leaves",
   settings: "nav.settings",
 } as const satisfies Record<AppView, string>
 
