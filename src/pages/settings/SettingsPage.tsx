@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next"
 
+import { LanguageSettingsCard } from "@/components/settings/LanguageSettingsCard"
 import { PasswordSettingsCard } from "@/components/settings/PasswordSettingsCard"
 import { SettingsForm } from "@/components/settings/SettingsForm"
 import { SettingsGate } from "@/components/settings/SettingsGate"
@@ -34,6 +35,7 @@ export function SettingsPage({ userEmail }: SettingsPageProps) {
           {t("settings.account")}
         </h3>
         <PasswordSettingsCard email={userEmail} />
+        <LanguageSettingsCard />
       </section>
     </main>
   )

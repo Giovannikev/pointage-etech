@@ -13,11 +13,16 @@
     "logoutError": "Couldn't log out"
   },
   "language": {
-    "change": "Change language"
+    "change": "Change language",
+    "title": "Language",
+    "description": "Language of the interface on this device. Descriptions sent to Odoo stay in French."
   },
   "theme": {
-    "toggle": "Toggle dark mode",
-    "toggleHint": "Toggle dark mode (D)"
+    "change": "Change theme",
+    "changeHint": "Change theme (D toggles light and dark)",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
   },
   "nav": {
     "timesheet": "Timesheet",

@@ -1,4 +1,3 @@
-import { LanguageSwitcher } from "@/components/LanguageSwitcher"
 import { CheckInWidget } from "@/components/leaves/CheckInWidget"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { Separator } from "@/components/ui/separator"
@@ -16,7 +15,6 @@ export function SiteHeader({ title }: { title: string }) {
         <h1 className="min-w-0 truncate text-base font-medium">{title}</h1>
         <div className="ml-auto flex items-center gap-1">
           <CheckInWidget />
-          <LanguageSwitcher />
           <ThemeToggle />
         </div>
       </div>

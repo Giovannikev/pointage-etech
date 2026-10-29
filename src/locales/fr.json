@@ -13,11 +13,16 @@
     "logoutError": "Impossible de se déconnecter"
   },
   "language": {
-    "change": "Changer de langue"
+    "change": "Changer de langue",
+    "title": "Langue",
+    "description": "Langue de l'interface sur cet appareil. Les descriptions envoyées à Odoo restent en français."
   },
   "theme": {
-    "toggle": "Basculer le mode sombre",
-    "toggleHint": "Basculer le mode sombre (D)"
+    "change": "Changer de thème",
+    "changeHint": "Changer de thème (D bascule clair et sombre)",
+    "light": "Clair",
+    "dark": "Sombre",
+    "system": "Système"
   },
   "nav": {
     "timesheet": "Feuille de temps",
