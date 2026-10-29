@@ -39,12 +39,14 @@ export function groupAttendanceByDay(
   return [...days.values()].sort((a, b) => b.date.localeCompare(a.date))
 }
 
-/** Worked hours of an attendance; still running when it has no check-out. */
+/**
+ * Time present during an attendance, from check-in to check-out (or `now`
+ * while it runs), as Odoo's attendance button totals it. Odoo's worked_hours
+ * field would deduct the lunch break of the working schedule instead.
+ */
 export function attendanceHours(attendance: Attendance, now: Date): number {
-  if (attendance.checkOut !== null) {
-    return attendance.workedHours
-  }
-  const elapsed = now.getTime() - new Date(attendance.checkIn).getTime()
+  const end = attendance.checkOut === null ? now : new Date(attendance.checkOut)
+  const elapsed = end.getTime() - new Date(attendance.checkIn).getTime()
   return Math.max(0, elapsed / 3_600_000)
 }
 

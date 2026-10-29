@@ -58,7 +58,7 @@ describe("groupAttendanceByDay", () => {
         attendance({
           attendanceId: 3,
           checkIn: "2026-10-25T21:30:00Z",
-          workedHours: 1,
+          checkOut: "2026-10-25T22:30:00Z",
         }),
         // Outside the period.
         attendance({ attendanceId: 4, checkIn: "2026-10-20T05:00:00Z" }),
@@ -71,6 +71,19 @@ describe("groupAttendanceByDay", () => {
       ["2026-10-27", 8],
       ["2026-10-26", 1],
     ])
+  })
+
+  it("counts the time present, not Odoo's worked hours without the lunch break", () => {
+    expect(
+      attendanceHours(
+        attendance({
+          checkIn: "2026-10-29T06:01:00Z",
+          checkOut: "2026-10-29T09:33:00Z",
+          workedHours: 2.96,
+        }),
+        now
+      )
+    ).toBeCloseTo(3.53, 2)
   })
 
   it("never counts negative time", () => {
