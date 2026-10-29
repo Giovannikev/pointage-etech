@@ -451,7 +451,12 @@
     "delete": "Supprimer la demande",
     "deleteTitle": "Supprimer cette demande ?",
     "deleteDescription": "Votre demande « {{type}} » sera supprimée dans Odoo.",
-    "deleted": "Demande supprimée"
+    "deleted": "Demande supprimée",
+    "widget": {
+      "label": "Présence : {{status}}",
+      "today": "Aujourd'hui : {{hours}}",
+      "details": "Voir mes présences"
+    }
   },
   "editTimesheet": {
     "title": "Modifier le pointage",

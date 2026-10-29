@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Loader2Icon, LogInIcon, LogOutIcon, RefreshCwIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 
 import { CommitPeriodPicker } from "@/components/timesheet/CommitPeriodPicker"
 import { InstanceBadge } from "@/components/timesheet/InstanceBadge"
@@ -16,84 +15,40 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useOdooInstances } from "@/contexts/SettingsContext"
 import { useCachedQuery } from "@/hooks/useCachedQuery"
 import { useFormatters } from "@/hooks/useFormatters"
 import { cn } from "@/lib/utils"
+import { useCheckInOut } from "@/hooks/useCheckInOut"
+import { useNow } from "@/hooks/useNow"
 import {
-  checkInOut,
   fetchAttendance,
+  onAttendanceChanged,
   peekAttendance,
 } from "@/services/odooService"
-import type {
-  AttendanceInstanceResult,
-  CommitPeriod,
-  OdooInstanceIndex,
-} from "@/types/timesheet"
+import type { AttendanceInstanceResult, CommitPeriod } from "@/types/timesheet"
 import { formatDuration, groupAttendanceByDay } from "@/utils/leaves"
 import { getPresetPeriod, isValidPeriod } from "@/utils/period"
 
 type AvailableAttendance = Extract<AttendanceInstanceResult, { ok: true }>
 
-/** Re-renders every minute, so the time since check-in keeps running. */
-function useNow(): Date {
-  const [now, setNow] = useState(() => new Date())
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 60_000)
-    return () => window.clearInterval(timer)
-  }, [])
-  return now
-}
-
 function CheckInStatus({
   result,
   showInstance,
   now,
-  onChanged,
 }: {
   result: AvailableAttendance
   showInstance: boolean
   now: Date
-  onChanged: () => void
 }) {
   const { t } = useTranslation()
   const { formatTime } = useFormatters()
-  const instances = useOdooInstances()
-  const [isSaving, setIsSaving] = useState(false)
-  const odooUrl = instances.find(
-    (instance) => instance.index === result.instanceIndex
-  )?.url
+  const { isSaving, toggle } = useCheckInOut(result.instanceIndex)
 
   const isIn = result.openSince !== null
   const elapsed =
     result.openSince === null
       ? 0
       : Math.max(0, (now.getTime() - Date.parse(result.openSince)) / 3_600_000)
-
-  const toggle = async (index: OdooInstanceIndex): Promise<void> => {
-    setIsSaving(true)
-    try {
-      const openSince = await checkInOut(index)
-      toast.success(
-        openSince === null ? t("leaves.checkedOut") : t("leaves.checkedIn")
-      )
-      onChanged()
-    } catch (error) {
-      // Odoo's own button still works when the gateway can't sign in.
-      toast.error(t("leaves.checkInError"), {
-        description: error instanceof Error ? error.message : String(error),
-        action:
-          odooUrl === undefined
-            ? undefined
-            : {
-                label: t("leaves.openOdoo"),
-                onClick: () => window.open(`${odooUrl}/odoo`, "_blank"),
-              },
-      })
-    } finally {
-      setIsSaving(false)
-    }
-  }
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border p-3">
@@ -122,7 +77,7 @@ function CheckInStatus({
       <Button
         variant={isIn ? "outline" : "default"}
         disabled={isSaving}
-        onClick={() => void toggle(result.instanceIndex)}
+        onClick={() => void toggle()}
         className="max-sm:w-full"
       >
         {isSaving ? (
@@ -154,6 +109,8 @@ export function AttendanceCard() {
   const peek = useCallback(() => peekAttendance({ from, to }), [from, to])
   const query = useCachedQuery(`attendance:${from}:${to}`, fetcher, peek)
   const { data, error, isLoading, isRefreshing, refresh } = query
+  // A check-in from the floating button shows here too.
+  useEffect(() => onAttendanceChanged(refresh), [refresh])
 
   const available = useMemo(
     () =>
@@ -220,7 +177,6 @@ export function AttendanceCard() {
               result={result}
               showInstance={showInstance}
               now={now}
-              onChanged={refresh}
             />
           ))
         )}

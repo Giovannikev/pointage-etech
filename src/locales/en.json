@@ -451,7 +451,12 @@
     "delete": "Delete request",
     "deleteTitle": "Delete this request?",
     "deleteDescription": "Your {{type}} request will be deleted in Odoo.",
-    "deleted": "Request deleted"
+    "deleted": "Request deleted",
+    "widget": {
+      "label": "Attendance: {{status}}",
+      "today": "Today: {{hours}}",
+      "details": "See my attendance"
+    }
   },
   "editTimesheet": {
     "title": "Edit timesheet",

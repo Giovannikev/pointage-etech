@@ -1246,6 +1246,17 @@ export function peekAttendance(
   return odooCache.peek(attendanceKey(period))
 }
 
+const ATTENDANCE_CHANGED = "pointage:attendance-changed"
+
+/**
+ * Calls `listener` after every check-in or check-out from the app, so every
+ * view showing attendance (page card, floating button) reads it again.
+ */
+export function onAttendanceChanged(listener: () => void): () => void {
+  window.addEventListener(ATTENDANCE_CHANGED, listener)
+  return () => window.removeEventListener(ATTENDANCE_CHANGED, listener)
+}
+
 /** Checks in, or out when checked in; resolves with the new open check-in. */
 export async function checkInOut(
   instanceIndex: OdooInstanceIndex
@@ -1258,5 +1269,6 @@ export async function checkInOut(
     throw new InvalidResponseError(GATEWAY_FUNCTION)
   } finally {
     odooCache.invalidate(ATTENDANCE_PREFIX)
+    window.dispatchEvent(new Event(ATTENDANCE_CHANGED))
   }
 }
