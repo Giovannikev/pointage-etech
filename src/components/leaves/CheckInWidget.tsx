@@ -80,9 +80,9 @@ function WidgetPanel({
 }
 
 /**
- * Floating attendance button, on every page: the time worked today while
- * checked in, "Absent" otherwise. It opens a panel to check in or out, so a
- * stray tap never records an attendance. Hidden without the Attendances app.
+ * Attendance button of the page header: the time worked today while checked
+ * in, "Absent" otherwise. It opens a panel to check in or out, so a stray
+ * tap never records an attendance. Hidden without the Attendances app.
  */
 export function CheckInWidget() {
   const { t } = useTranslation()
@@ -138,23 +138,23 @@ export function CheckInWidget() {
   return (
     <Popover open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
-        {/* On phones, above the timesheet's sticky "Send all lines" bar. */}
-        <button
-          type="button"
-          className="fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-full border bg-background/95 px-4 py-2.5 text-sm font-medium shadow-lg backdrop-blur-md transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 max-md:bottom-32"
+        <Button
+          variant="ghost"
+          size="sm"
+          className="gap-2 rounded-full"
           aria-label={t("leaves.widget.label", { status: label })}
         >
           <span
             aria-hidden
             className={cn(
-              "size-2.5 shrink-0 rounded-full",
+              "size-2 shrink-0 rounded-full",
               isIn ? "animate-pulse bg-success" : "bg-muted-foreground/40"
             )}
           />
           <span className="tabular-nums">{label}</span>
-        </button>
+        </Button>
       </PopoverTrigger>
-      <PopoverContent side="top" align="end" className="w-64">
+      <PopoverContent side="bottom" align="end" className="w-64">
         <WidgetPanel
           result={result}
           workedToday={workedToday}

@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 
 import { AppSidebar } from "@/components/dashboard/appSidebar"
 import { SiteHeader } from "@/components/dashboard/siteHeader"
-import { CheckInWidget } from "@/components/leaves/CheckInWidget"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import type { AppView } from "@/types/navigation"
 
@@ -65,7 +64,6 @@ export function DashboardLayout({
         <SiteHeader title={t(VIEW_TITLE_KEYS[activeView])} />
         <div className="flex flex-1 flex-col">{children}</div>
       </SidebarInset>
-      <CheckInWidget />
     </SidebarProvider>
   )
 }
