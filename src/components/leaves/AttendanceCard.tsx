@@ -30,7 +30,7 @@ import type {
   CommitPeriod,
   OdooInstanceIndex,
 } from "@/types/timesheet"
-import { groupAttendanceByDay } from "@/utils/leaves"
+import { formatDuration, groupAttendanceByDay } from "@/utils/leaves"
 import { getPresetPeriod, isValidPeriod } from "@/utils/period"
 
 type AvailableAttendance = Extract<AttendanceInstanceResult, { ok: true }>
@@ -57,7 +57,7 @@ function CheckInStatus({
   onChanged: () => void
 }) {
   const { t } = useTranslation()
-  const { formatTime, formatHours } = useFormatters()
+  const { formatTime } = useFormatters()
   const instances = useOdooInstances()
   const [isSaving, setIsSaving] = useState(false)
   const odooUrl = instances.find(
@@ -114,7 +114,7 @@ function CheckInStatus({
         </p>
         {isIn && (
           <p className="text-xs text-muted-foreground tabular-nums">
-            {t("leaves.elapsed", { hours: formatHours(round2(elapsed)) })}
+            {t("leaves.elapsed", { hours: formatDuration(elapsed) })}
           </p>
         )}
       </div>
@@ -138,14 +138,10 @@ function CheckInStatus({
   )
 }
 
-function round2(value: number): number {
-  return Math.round(value * 100) / 100
-}
-
 /** Attendance: whether the user is checked in, and the period's hours. */
 export function AttendanceCard() {
   const { t } = useTranslation()
-  const { formatLongDate, formatTime, formatHours } = useFormatters()
+  const { formatLongDate, formatTime } = useFormatters()
   const [period, setPeriod] = useState<CommitPeriod>(() =>
     getPresetPeriod("thisWeek")
   )
@@ -243,7 +239,7 @@ export function AttendanceCard() {
                     {t("leaves.periodTotal")}
                   </span>
                   <span className="font-semibold tabular-nums">
-                    {formatHours(round2(total))}
+                    {formatDuration(total)}
                   </span>
                 </p>
                 {days.length === 0 ? (
@@ -274,7 +270,7 @@ export function AttendanceCard() {
                           ))}
                         </div>
                         <span className="shrink-0 font-medium tabular-nums">
-                          {formatHours(round2(day.hours))}
+                          {formatDuration(day.hours)}
                         </span>
                       </li>
                     ))}

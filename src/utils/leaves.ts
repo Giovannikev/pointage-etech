@@ -50,6 +50,12 @@ export function attendanceHours(attendance: Attendance, now: Date): number {
   return Math.max(0, elapsed / 3_600_000)
 }
 
+/** "7:26" for 7.44 hours, as Odoo shows durations; minutes are rounded. */
+export function formatDuration(hours: number): string {
+  const minutes = Math.round(Math.max(0, hours) * 60)
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`
+}
+
 /** "09:30" for 9.5, as Odoo stores the hours of an hour-based request. */
 export function formatHourOfDay(hour: number): string {
   const minutes = Math.round(hour * 60)

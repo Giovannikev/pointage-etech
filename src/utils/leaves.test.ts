@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { Attendance, LeaveRequest } from "@/types/timesheet"
 import {
   attendanceHours,
+  formatDuration,
   formatHourOfDay,
   groupAttendanceByDay,
   leaveStateTone,
@@ -104,6 +105,16 @@ describe("hours of the day", () => {
     expect(parseHourOfDay("8:00")).toBe(8)
     expect(parseHourOfDay("25:00")).toBeNull()
     expect(parseHourOfDay("9h")).toBeNull()
+  })
+})
+
+describe("formatDuration", () => {
+  it("shows hours and minutes like Odoo", () => {
+    expect(formatDuration(7.44)).toBe("7:26")
+    expect(formatDuration(3.72)).toBe("3:43")
+    expect(formatDuration(0.05)).toBe("0:03")
+    expect(formatDuration(10)).toBe("10:00")
+    expect(formatDuration(-1)).toBe("0:00")
   })
 })
 
