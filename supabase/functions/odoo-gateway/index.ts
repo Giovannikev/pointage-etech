@@ -28,18 +28,19 @@
  *   { action: "LIST_TASKS", query?, projects?, assignees?, includeClosed, instanceIndex? }
  *   { action: "LIST_ASSIGNEES", instanceIndex? }
  */
+import {
+  readOwnEmployeeId,
+  toggleAttendance,
+} from "../_shared/attendance.ts"
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
 import { noteToHtml } from "../_shared/chatterNote.ts"
 import {
-  callWebRoute,
-  closeWebSession,
   createSessionPool,
   executeKw,
   OdooRpcError,
   type OdooSession,
   readMany2one,
-  openWebSession,
   readServerMajorVersion,
 } from "../_shared/odoo.ts"
 import {
@@ -2679,54 +2680,6 @@ async function optionalModelFields(
   }
 }
 
-/** The signed-in user's employee on this instance; null without one. */
-async function readOwnEmployeeId(session: OdooSession): Promise<number | null> {
-  const records = await executeKw(
-    session,
-    "res.users",
-    "read",
-    [[session.uid]],
-    { fields: ["employee_id"] }
-  )
-  const record = Array.isArray(records) ? records[0] : undefined
-  return isRecord(record)
-    ? (readMany2one(record.employee_id)?.id ?? null)
-    : null
-}
-
-/**
- * True when the user's access rights allow `operation` on the model:
- * has_access from Odoo 18, check_access_rights before.
- */
-async function hasModelAccess(
-  session: OdooSession,
-  model: string,
-  operation: "create" | "write"
-): Promise<boolean> {
-  try {
-    return (
-      (await executeKw(session, model, "has_access", [[], operation])) === true
-    )
-  } catch (error) {
-    if (!(error instanceof OdooRpcError)) throw error
-  }
-  try {
-    return (
-      (await executeKw(session, model, "check_access_rights", [operation], {
-        raise_exception: false,
-      })) === true
-    )
-  } catch (error) {
-    if (error instanceof OdooRpcError) return false
-    throw error
-  }
-}
-
-/** Current UTC time as an Odoo datetime, "YYYY-MM-DD HH:MM:SS". */
-function odooNow(): string {
-  return new Date().toISOString().slice(0, 19).replace("T", " ")
-}
-
 const LEAVE_STATES: readonly LeaveState[] = [
   "confirm",
   "refuse",
@@ -3138,12 +3091,7 @@ function getAttendance(
   )
 }
 
-/**
- * Checks the user in, or out when an attendance is open. With the right to
- * create and edit attendances, through the API; otherwise like Odoo's own
- * attendance button, whose route runs with more rights: it needs a web
- * session, which Odoo opens with the user's password only.
- */
+/** Checks the user in, or out when an attendance is open. */
 async function checkInOut(
   instances: OdooInstanceSettings[],
   instanceIndex: InstanceIndex
@@ -3156,44 +3104,9 @@ async function checkInOut(
       409
     )
   }
-  const [canCreate, canWrite] = await Promise.all([
-    hasModelAccess(session, "hr.attendance", "create"),
-    hasModelAccess(session, "hr.attendance", "write"),
-  ])
-  if (!canCreate || !canWrite) {
-    const webSession = await openWebSession(session.connection)
-    try {
-      await asConflict(
-        callWebRoute(
-          session.connection,
-          webSession,
-          "/hr_attendance/systray_check_in_out"
-        )
-      )
-    } finally {
-      await closeWebSession(session.connection, webSession)
-    }
-    const open = await readOpenAttendance(session, employeeId)
-    return { openSince: open?.checkIn ?? null }
-  }
-
+  await asConflict(toggleAttendance(session, employeeId))
   const open = await readOpenAttendance(session, employeeId)
-  if (open === null) {
-    const now = odooNow()
-    await asConflict(
-      executeKw(session, "hr.attendance", "create", [
-        { employee_id: employeeId, check_in: now },
-      ])
-    )
-    return { openSince: readDeadline(now) }
-  }
-  await asConflict(
-    executeKw(session, "hr.attendance", "write", [
-      [open.attendanceId],
-      { check_out: odooNow() },
-    ])
-  )
-  return { openSince: null }
+  return { openSince: open?.checkIn ?? null }
 }
 
 /* ------------------------------------------------------------------ */

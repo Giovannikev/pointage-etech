@@ -259,6 +259,7 @@ it is kept as written. A description edited by hand is never regenerated.
 | `user-settings`  | `PUT`  | Verifies, encrypts and stores new settings                |
 | `github-commits` | `POST` | Commits authored between `since` and `until` (1 year max) |
 | `odoo-gateway`   | `POST` | Odoo actions, chosen by the `action` field below          |
+| `auto-attendance` | `POST` | Called by pg_cron: checks users in and out on schedule  |
 
 `odoo-gateway` actions:
 
@@ -338,6 +339,28 @@ such users save their Odoo password in Settings to check in from Pointage.
 
 Validated timesheets (Odoo Timesheets app, `validated` field) are shown
 locked and can't be edited or deleted from Pointage.
+
+### Automatic attendance
+
+`auto-attendance` checks a user in and out of Odoo on working days, at the
+times of their row in `auto_attendance_preferences` (09:00-12:30 and
+13:30-18:00 by default), minus their time off: nothing on a day off or a
+public holiday, only the other half on a half day, and a check-out and
+check-in around hours off. Pending requests count as time off; requests of
+a "worked time" type (remote work, training) don't. It acts only
+at a planned time and only when the state differs, so a check-out by hand
+holds until the next planned time; a failed punch is retried for 30 minutes.
+
+To set it up: run the `20261030000000_auto_attendance` migration, deploy the
+function with JWT verification off (it reuses the `CRON_SECRET` secret),
+then run `supabase/cron/auto-attendance.sql` in the SQL Editor. To see the
+day's plan without punching:
+
+```bash
+curl -X POST https://<PROJECT_REF>.supabase.co/functions/v1/auto-attendance \
+  -H "x-cron-secret: <CRON_SECRET>" -H "Content-Type: application/json" \
+  -d '{"dryRun": true}'
+```
 
 The front end splits larger batches into several requests. Shared server code
 (auth, encryption, Odoo and GitHub clients, validation) lives in
