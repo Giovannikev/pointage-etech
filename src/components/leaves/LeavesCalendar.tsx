@@ -59,7 +59,7 @@ function LegendItem({
 }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span aria-hidden className={cn("size-3 rounded-sm", className)} />
+      <span aria-hidden className={cn("size-3 rounded-full", className)} />
       {label}
     </span>
   )
@@ -425,10 +425,10 @@ export function LeavesCalendar({
           className="bg-warning"
           label={t("leaves.calendar.legendHoliday")}
         />
-        <span className="flex items-center gap-1.5">
-          <HourglassIcon className="size-3" />
-          {t("leaves.calendar.legendPending")}
-        </span>
+        <LegendItem
+          className={cn("text-muted-foreground", PENDING_STYLE)}
+          label={t("leaves.calendar.legendPending")}
+        />
       </div>
     </section>
   )
