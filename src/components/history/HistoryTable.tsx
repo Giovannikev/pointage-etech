@@ -114,15 +114,17 @@ function DayTotal({
   const missing = roundHours(WORKDAY_HOURS - day.hours)
   const canComplete = missing > 0 && day.date <= todayIsoDate()
   return (
-    <span className="inline-flex items-center gap-2 tabular-nums">
-      <span className="font-semibold">{formatHours(day.hours)}</span>
+    <span className="inline-flex flex-wrap items-center justify-end gap-x-2 gap-y-1 tabular-nums">
+      <span className="font-semibold whitespace-nowrap">
+        {formatHours(day.hours)}
+      </span>
       {missing <= 0 ? (
         <CircleCheckIcon
           className="size-4 text-success"
           aria-label={t("history.dayComplete")}
         />
       ) : (
-        <span className="text-xs font-medium text-warning">
+        <span className="text-xs font-medium whitespace-nowrap text-warning">
           {t("history.dayShort", { hours: formatHours(missing) })}
         </span>
       )}
@@ -180,7 +182,7 @@ export function HistoryTable({
       <div className="grid gap-5 @4xl:hidden">
         {days.map((day) => (
           <section key={day.date} className="grid gap-2">
-            <header className="flex items-center justify-between gap-3 px-1">
+            <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-1">
               <h3 className="text-sm font-semibold first-letter:uppercase">
                 {formatLongDate(day.date)}
               </h3>

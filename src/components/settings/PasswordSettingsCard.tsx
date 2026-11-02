@@ -151,7 +151,7 @@ export function PasswordSettingsCard({ email }: PasswordSettingsCardProps) {
           type="button"
           variant="link"
           size="sm"
-          className="h-auto px-0 whitespace-normal"
+          className="h-auto min-w-0 shrink justify-start px-0 text-left whitespace-normal"
           disabled={isSendingLink}
           onClick={() => void sendResetLink()}
         >

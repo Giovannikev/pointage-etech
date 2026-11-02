@@ -90,7 +90,8 @@ export function EntryDate({
     <span
       className={cn(
         "text-muted-foreground",
-        stacked ? "grid gap-0.5" : "flex items-baseline gap-1.5"
+        // The grid would let the table squeeze the date under the next column.
+        stacked ? "grid min-w-max gap-0.5" : "flex items-baseline gap-1.5"
       )}
     >
       <span className="whitespace-nowrap">{formatShortDate(entry.date)}</span>
