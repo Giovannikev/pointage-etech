@@ -19,6 +19,7 @@ import {
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
+import { LeavesCalendar } from "@/components/leaves/LeavesCalendar"
 import { TimeOffRequestDialog } from "@/components/leaves/TimeOffRequestDialog"
 import { InstanceBadge } from "@/components/timesheet/InstanceBadge"
 import { InstanceErrorNotice } from "@/components/timesheet/InstanceErrorNotice"
@@ -89,6 +90,10 @@ const TONE_STYLES = {
   canceled: "bg-muted text-muted-foreground line-through",
 } as const
 
+/**
+ * A balance at a glance: what is left, large, and a bar of what was taken
+ * out of what was allocated.
+ */
 function BalanceTile({
   type,
   showInstance,
@@ -98,32 +103,59 @@ function BalanceTile({
 }) {
   const { t, i18n } = useTranslation()
   const { formatHours } = useFormatters()
-  const number = (value: number) =>
-    new Intl.NumberFormat(i18n.resolvedLanguage, {
-      maximumFractionDigits: 2,
-    }).format(value)
+  const format = (value: number) =>
+    type.unit === "hour"
+      ? formatHours(value)
+      : new Intl.NumberFormat(i18n.resolvedLanguage, {
+          maximumFractionDigits: 2,
+        }).format(value)
   const remaining = type.remaining ?? 0
+  const allocated = type.allocated
+  const share =
+    allocated !== null && allocated > 0
+      ? Math.min(100, Math.max(0, (remaining / allocated) * 100))
+      : null
   return (
-    <div className="grid gap-1 rounded-lg border p-3">
-      <p className="truncate text-xs text-muted-foreground" title={type.name}>
-        {type.name}
+    <div className="grid min-w-52 flex-1 gap-2 rounded-lg bg-muted/40 p-3 sm:max-w-xs">
+      <div className="flex items-center justify-between gap-2">
+        <p className="truncate text-sm font-medium" title={type.name}>
+          {type.name}
+        </p>
+        {showInstance && <InstanceBadge instanceIndex={type.instanceIndex} />}
+      </div>
+      <p className="flex items-baseline gap-1.5">
+        <span className="text-3xl font-semibold tracking-tight tabular-nums">
+          {format(remaining)}
+        </span>
+        <span className="text-sm text-muted-foreground">
+          {type.unit === "hour"
+            ? t("leaves.hoursLeft")
+            : t("leaves.daysLeft", { count: remaining })}
+        </span>
       </p>
-      <p className="text-2xl font-semibold tabular-nums">
-        {type.unit === "hour" ? formatHours(remaining) : number(remaining)}
-      </p>
-      <p className="text-xs text-muted-foreground">
-        {type.unit === "hour"
-          ? t("leaves.hoursLeft")
-          : t("leaves.daysLeft", { count: remaining })}
-        {type.allocated !== null &&
-          ` · ${t("leaves.outOf", {
-            total:
-              type.unit === "hour"
-                ? formatHours(type.allocated)
-                : number(type.allocated),
-          })}`}
-      </p>
-      {showInstance && <InstanceBadge instanceIndex={type.instanceIndex} />}
+      {share !== null && allocated !== null && (
+        <>
+          <div
+            className="h-1.5 overflow-hidden rounded-full bg-muted"
+            role="meter"
+            aria-valuemin={0}
+            aria-valuemax={allocated}
+            aria-valuenow={remaining}
+            aria-label={type.name}
+          >
+            <div
+              className="h-full rounded-full bg-time-off"
+              style={{ width: `${share}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {t("leaves.balanceTaken", {
+              taken: format(Math.max(0, allocated - remaining)),
+              total: format(allocated),
+            })}
+          </p>
+        </>
+      )}
     </div>
   )
 }
@@ -144,6 +176,12 @@ function RequestRow({
   const { t } = useTranslation()
   const { formatMediumDate, formatShortDate } = useFormatters()
   const tone = leaveStateTone(request.state)
+  const today = todayIsoDate()
+  // Started and not over: the time off is happening now.
+  const isOngoing =
+    (tone === "approved" || tone === "pending") &&
+    request.dateFrom <= today &&
+    today <= request.dateTo
 
   let when =
     request.dateFrom === request.dateTo
@@ -163,6 +201,11 @@ function RequestRow({
           <span className="truncate text-sm font-medium">
             {request.leaveTypeName}
           </span>
+          {isOngoing && (
+            <Badge className="bg-primary font-semibold text-primary-foreground">
+              {t("leaves.ongoingBadge")}
+            </Badge>
+          )}
           <Badge className={cn("font-semibold", TONE_STYLES[tone])}>
             {t(`leaves.state.${request.state}`)}
           </Badge>
@@ -392,7 +435,7 @@ function DeleteRequestDialog({
   )
 }
 
-/** Time off: balances, requests and their state, new requests. */
+/** Time off: balances, new requests, the month's calendar and the requests. */
 export function TimeOffCard() {
   const { t } = useTranslation()
   const fetcher = useCallback(
@@ -543,7 +586,7 @@ export function TimeOffCard() {
               )}
             </div>
             {balances.length > 0 && (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="flex flex-wrap gap-3">
                 {balances.map((type) => (
                   <BalanceTile
                     key={`${type.instanceIndex}:${type.leaveTypeId}`}
@@ -553,52 +596,60 @@ export function TimeOffCard() {
                 ))}
               </div>
             )}
-            {allRequests.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                <select
-                  aria-label={t("leaves.filterType")}
-                  className={SELECT_CLASS}
-                  value={typeFilter}
-                  onChange={(event) => setTypeFilter(event.target.value)}
-                >
-                  <option value="">{t("leaves.allTypes")}</option>
-                  {typeNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label={t("leaves.filterState")}
-                  className={SELECT_CLASS}
-                  value={toneFilter}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setToneFilter(TONES.find((tone) => tone === value) ?? "")
-                  }}
-                >
-                  <option value="">{t("leaves.allStates")}</option>
-                  {TONES.map((tone) => (
-                    <option key={tone} value={tone}>
-                      {t(`leaves.tone.${tone}`)}
-                    </option>
-                  ))}
-                </select>
+            {/* The month on the left, the requests beside it. */}
+            <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+              <LeavesCalendar />
+              <div className="grid min-w-0 content-start gap-4">
+                {allRequests.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    <select
+                      aria-label={t("leaves.filterType")}
+                      className={SELECT_CLASS}
+                      value={typeFilter}
+                      onChange={(event) => setTypeFilter(event.target.value)}
+                    >
+                      <option value="">{t("leaves.allTypes")}</option>
+                      {typeNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      aria-label={t("leaves.filterState")}
+                      className={SELECT_CLASS}
+                      value={toneFilter}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setToneFilter(
+                          TONES.find((tone) => tone === value) ?? ""
+                        )
+                      }}
+                    >
+                      <option value="">{t("leaves.allStates")}</option>
+                      {TONES.map((tone) => (
+                        <option key={tone} value={tone}>
+                          {t(`leaves.tone.${tone}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {renderList(t("leaves.upcoming"), upcoming)}
+                {past.length > 0 && (
+                  <RequestCarousel
+                    title={t("leaves.past")}
+                    requests={past}
+                    renderItem={renderRow}
+                  />
+                )}
+                {upcoming.length === 0 && past.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    {isFiltered ? t("leaves.noMatch") : t("leaves.noRequests")}
+                  </p>
+                )}
               </div>
-            )}
-            {renderList(t("leaves.upcoming"), upcoming)}
-            {past.length > 0 && (
-              <RequestCarousel
-                title={t("leaves.past")}
-                requests={past}
-                renderItem={renderRow}
-              />
-            )}
-            {upcoming.length === 0 && past.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                {isFiltered ? t("leaves.noMatch") : t("leaves.noRequests")}
-              </p>
-            )}
+            </div>
           </>
         )}
       </CardContent>

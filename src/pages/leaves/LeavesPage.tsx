@@ -2,7 +2,6 @@ import { useTranslation } from "react-i18next"
 
 import { AttendanceCard } from "@/components/leaves/AttendanceCard"
 import { AutoAttendanceCard } from "@/components/leaves/AutoAttendanceCard"
-import { LeavesCalendar } from "@/components/leaves/LeavesCalendar"
 import { TimeOffCard } from "@/components/leaves/TimeOffCard"
 import { SettingsGate } from "@/components/settings/SettingsGate"
 import { SetupRequiredState } from "@/components/timesheet/SetupRequiredState"
@@ -33,15 +32,13 @@ export function LeavesPage({ onOpenSettings }: LeavesPageProps) {
                   {t("leaves.subtitle")}
                 </p>
               </div>
-              {/* Daily use first: attendance and its automation, time off. */}
+              {/* Attendance and its automation side by side. */}
               <div className="grid items-start gap-6 xl:grid-cols-2">
-                <div className="grid min-w-0 gap-6">
-                  <AttendanceCard schedule={autoAttendance.preferences} />
-                  <AutoAttendanceCard state={autoAttendance} />
-                </div>
-                <TimeOffCard />
+                <AttendanceCard schedule={autoAttendance.preferences} />
+                <AutoAttendanceCard state={autoAttendance} />
               </div>
-              <LeavesCalendar />
+              {/* Time off: balances, the month and the requests, full width. */}
+              <TimeOffCard />
             </>
           ) : (
             <SetupRequiredState onOpenSettings={onOpenSettings} />

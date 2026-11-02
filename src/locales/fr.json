@@ -422,7 +422,7 @@
     "noAttendance": "Aucune présence sur cette période.",
     "ongoing": "en cours",
     "timeOffTitle": "Congés",
-    "timeOffSubtitle": "Vos soldes et vos demandes : congés payés, maladie, télétravail…",
+    "timeOffSubtitle": "Vos soldes, le calendrier du mois et vos demandes : congés payés, maladie, télétravail…",
     "timeOffUnavailable": "Aucune de vos instances Odoo n'utilise l'application Congés pour votre utilisateur.",
     "newRequest": "Nouvelle demande",
     "newRequestHint": "Envoyée à Odoo pour approbation ; Odoo vérifie votre solde et les chevauchements.",
@@ -452,7 +452,6 @@
     "daysLeft_one": "jour restant",
     "daysLeft_other": "jours restants",
     "hoursLeft": "restantes",
-    "outOf": "sur {{total}}",
     "upcoming": "À venir et en cours",
     "past": "Passées",
     "noRequests": "Aucune demande de congé sur la dernière année.",
@@ -546,8 +545,6 @@
     },
     "noMatch": "Aucune demande ne correspond aux filtres.",
     "calendar": {
-      "title": "Calendrier",
-      "subtitle": "Vos congés, les jours fériés et vos heures de présence, mois par mois.",
       "previous": "Mois précédent",
       "next": "Mois suivant",
       "current": "Ce mois-ci",
@@ -560,7 +557,9 @@
     "carousel": {
       "previous": "Demandes précédentes",
       "next": "Demandes suivantes"
-    }
+    },
+    "balanceTaken": "{{taken}} pris sur {{total}}",
+    "ongoingBadge": "En cours"
   },
   "editTimesheet": {
     "title": "Modifier le pointage",

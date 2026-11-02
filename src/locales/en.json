@@ -422,7 +422,7 @@
     "noAttendance": "No attendance in this period.",
     "ongoing": "ongoing",
     "timeOffTitle": "Time off",
-    "timeOffSubtitle": "Your balances and requests: paid leave, sick leave, remote work…",
+    "timeOffSubtitle": "Your balances, the month's calendar and your requests: paid leave, sick leave, remote work…",
     "timeOffUnavailable": "None of your Odoo instances uses the Time Off app for your user.",
     "newRequest": "New request",
     "newRequestHint": "Sent to Odoo for approval, which checks your balance and overlaps.",
@@ -452,7 +452,6 @@
     "daysLeft_one": "day left",
     "daysLeft_other": "days left",
     "hoursLeft": "left",
-    "outOf": "out of {{total}}",
     "upcoming": "Upcoming and ongoing",
     "past": "Past",
     "noRequests": "No time off request in the last year.",
@@ -546,8 +545,6 @@
     },
     "noMatch": "No request matches the filters.",
     "calendar": {
-      "title": "Calendar",
-      "subtitle": "Your time off, public holidays and attendance hours, month by month.",
       "previous": "Previous month",
       "next": "Next month",
       "current": "This month",
@@ -560,7 +557,9 @@
     "carousel": {
       "previous": "Previous requests",
       "next": "Next requests"
-    }
+    },
+    "balanceTaken": "{{taken}} taken of {{total}}",
+    "ongoingBadge": "Ongoing"
   },
   "editTimesheet": {
     "title": "Edit timesheet",
