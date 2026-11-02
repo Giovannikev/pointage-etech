@@ -171,7 +171,17 @@
     "manualTaskHint": "Tâche choisie à la main : revérifier la ligne la conserve.",
     "commitTime": "Commit à {{time}}",
     "ticketLine": "Le temps est pointé sur ce ticket d'assistance",
-    "openTicket": "{{name}} (ouvrir le ticket dans Odoo)"
+    "openTicket": "{{name}} (ouvrir le ticket dans Odoo)",
+    "overview": {
+      "logged": "Saisi dans Odoo",
+      "present": "Présence",
+      "left": "Reste à saisir",
+      "leftHint": "Vous avez été présent plus longtemps que le temps saisi : récupérez vos commits ou complétez dans l'historique.",
+      "allLogged": "Votre temps de présence est saisi.",
+      "history": "Voir l'historique",
+      "more_one": "et {{count}} autre ligne",
+      "more_other": "et {{count}} autres lignes"
+    }
   },
   "status": {
     "pending": "En attente",
@@ -460,7 +470,15 @@
     "widget": {
       "label": "Présence : {{status}}",
       "today": "Aujourd'hui : {{hours}}",
-      "details": "Voir mes présences"
+      "details": "Voir mes présences",
+      "next": {
+        "in": "Arrivée automatique à {{time}}",
+        "out": "Départ automatique à {{time}}"
+      },
+      "nextShort": {
+        "in": "arrivée {{time}}",
+        "out": "départ {{time}}"
+      }
     },
     "auto": {
       "title": "Pointage automatique",

@@ -12,6 +12,7 @@ import { toast } from "sonner"
 import { SettingsGate } from "@/components/settings/SettingsGate"
 import { CommitImportModal } from "@/components/timesheet/CommitImportModal"
 import { CommitPeriodPicker } from "@/components/timesheet/CommitPeriodPicker"
+import { PeriodOverview } from "@/components/timesheet/PeriodOverview"
 import { SetupRequiredState } from "@/components/timesheet/SetupRequiredState"
 import { TimesheetActionBar } from "@/components/timesheet/TimesheetActionBar"
 import { TimesheetEmptyState } from "@/components/timesheet/TimesheetEmptyState"
@@ -242,7 +243,12 @@ export function TimesheetPage({
           onDeleteFromOdoo={timesheet.deleteFromOdoo}
         />
       ) : (
-        <TimesheetEmptyState />
+        <>
+          {isValidPeriod(timesheet.period) && (
+            <PeriodOverview period={timesheet.period} />
+          )}
+          <TimesheetEmptyState />
+        </>
       )}
     </>
   )

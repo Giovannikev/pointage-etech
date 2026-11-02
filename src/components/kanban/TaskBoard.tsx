@@ -751,7 +751,9 @@ export function TaskBoard({ scope }: TaskBoardProps) {
         role="region"
         aria-label={t("kanban.boardLabel")}
       >
-        <div className="flex w-max items-start gap-3">
+        {/* From lg, columns share the page's width; past their minimum
+            width they overflow and the board scrolls. */}
+        <div className="flex items-start gap-3">
           {columns.map((column) => (
             <KanbanColumn
               key={column.key}

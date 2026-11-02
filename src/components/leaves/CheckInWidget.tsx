@@ -12,8 +12,10 @@ import { useCachedQuery } from "@/hooks/useCachedQuery"
 import { useCheckInOut } from "@/hooks/useCheckInOut"
 import { useFormatters } from "@/hooks/useFormatters"
 import { toViewHash } from "@/hooks/useHashNavigation"
+import { useNextAutoPunch } from "@/hooks/useNextAutoPunch"
 import { useNow } from "@/hooks/useNow"
 import { cn } from "@/lib/utils"
+import type { PlannedPunch } from "@/services/autoAttendanceService"
 import {
   fetchAttendance,
   onAttendanceChanged,
@@ -28,10 +30,12 @@ type AvailableAttendance = Extract<AttendanceInstanceResult, { ok: true }>
 function WidgetPanel({
   result,
   workedToday,
+  nextPunch,
   onNavigate,
 }: {
   result: AvailableAttendance
   workedToday: number
+  nextPunch: PlannedPunch | null
   /** Closes the panel when the link leaves for the attendance page. */
   onNavigate: () => void
 }) {
@@ -53,6 +57,13 @@ function WidgetPanel({
         <p className="text-xs text-muted-foreground tabular-nums">
           {t("leaves.widget.today", { hours: formatDuration(workedToday) })}
         </p>
+        {nextPunch !== null && (
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {t(`leaves.widget.next.${nextPunch.action}`, {
+              time: nextPunch.time,
+            })}
+          </p>
+        )}
       </div>
       <Button
         variant={isIn ? "outline" : "default"}
@@ -100,6 +111,7 @@ export function CheckInWidget() {
     peek
   )
   const [isOpen, setIsOpen] = useState(false)
+  const nextPunch = useNextAutoPunch(now)
 
   useEffect(() => onAttendanceChanged(refresh), [refresh])
   // A check-in made in Odoo itself shows when the user comes back to the app.
@@ -152,12 +164,21 @@ export function CheckInWidget() {
             )}
           />
           <span className="tabular-nums">{label}</span>
+          {nextPunch !== null && (
+            <span className="text-muted-foreground tabular-nums max-md:hidden">
+              ·{" "}
+              {t(`leaves.widget.nextShort.${nextPunch.action}`, {
+                time: nextPunch.time,
+              })}
+            </span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" className="w-64">
         <WidgetPanel
           result={result}
           workedToday={workedToday}
+          nextPunch={nextPunch}
           onNavigate={() => setIsOpen(false)}
         />
       </PopoverContent>

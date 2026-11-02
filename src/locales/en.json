@@ -171,7 +171,17 @@
     "manualTaskHint": "Task picked by hand: checking the line again keeps it.",
     "commitTime": "Committed at {{time}}",
     "ticketLine": "Time is logged on this helpdesk ticket",
-    "openTicket": "{{name}} (open the ticket in Odoo)"
+    "openTicket": "{{name}} (open the ticket in Odoo)",
+    "overview": {
+      "logged": "Logged in Odoo",
+      "present": "Present",
+      "left": "Left to log",
+      "leftHint": "You were present longer than the time logged: fetch your commits or complete it from the history.",
+      "allLogged": "Your presence time is logged.",
+      "history": "See the history",
+      "more_one": "and {{count}} more line",
+      "more_other": "and {{count}} more lines"
+    }
   },
   "status": {
     "pending": "Pending",
@@ -460,7 +470,15 @@
     "widget": {
       "label": "Attendance: {{status}}",
       "today": "Today: {{hours}}",
-      "details": "See my attendance"
+      "details": "See my attendance",
+      "next": {
+        "in": "Automatic check-in at {{time}}",
+        "out": "Automatic check-out at {{time}}"
+      },
+      "nextShort": {
+        "in": "in at {{time}}",
+        "out": "out at {{time}}"
+      }
     },
     "auto": {
       "title": "Automatic attendance",

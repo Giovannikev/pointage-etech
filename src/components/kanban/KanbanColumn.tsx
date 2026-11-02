@@ -150,7 +150,7 @@ export function KanbanColumn({
     <section
       aria-label={name}
       className={cn(
-        "flex w-72 shrink-0 flex-col rounded-xl bg-muted/50 sm:w-80",
+        "flex w-72 shrink-0 flex-col rounded-xl bg-muted/50 sm:w-80 lg:w-auto lg:max-w-96 lg:min-w-64 lg:flex-1 lg:basis-0",
         zone.className
       )}
       title={dropTitle}
