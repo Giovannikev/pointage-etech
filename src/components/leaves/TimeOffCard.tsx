@@ -1,6 +1,15 @@
-import { useCallback, useMemo, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import {
   CalendarPlusIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   HouseIcon,
   Loader2Icon,
   PencilIcon,
@@ -70,9 +79,6 @@ interface DialogState {
   preset: { type: LeaveType; date: string } | null
 }
 
-/** Past requests shown before "Show all": the list can hold a year. */
-const PAST_PREVIEW = 3
-
 const SELECT_CLASS =
   "h-8 min-w-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
 
@@ -125,11 +131,13 @@ function BalanceTile({
 function RequestRow({
   request,
   showInstance,
+  className,
   onEdit,
   onDelete,
 }: {
   request: LeaveRequest
   showInstance: boolean
+  className?: string
   onEdit: (request: LeaveRequest) => void
   onDelete: (request: LeaveRequest) => void
 }) {
@@ -149,7 +157,7 @@ function RequestRow({
   }
 
   return (
-    <li className="flex items-start gap-3 px-3 py-2.5">
+    <li className={cn("flex items-start gap-3 px-3 py-2.5", className)}>
       <div className="grid min-w-0 flex-1 gap-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="truncate text-sm font-medium">
@@ -199,6 +207,110 @@ function RequestRow({
     </li>
   )
 }
+
+/**
+ * Requests side by side, one card per request, scrolled with the arrows or
+ * a swipe: a year of past requests without a long list.
+ */
+function RequestCarousel({
+  title,
+  requests,
+  renderItem,
+}: {
+  title: string
+  requests: LeaveRequest[]
+  renderItem: (request: LeaveRequest, className: string) => ReactNode
+}) {
+  const { t } = useTranslation()
+  const track = useRef<HTMLUListElement>(null)
+  const [position, setPosition] = useState({
+    first: 0,
+    atStart: true,
+    atEnd: false,
+  })
+
+  const readPosition = useCallback(() => {
+    const element = track.current
+    if (element === null) return
+    const card = element.firstElementChild?.getBoundingClientRect().width ?? 1
+    setPosition({
+      first: Math.round(element.scrollLeft / (card + CAROUSEL_GAP)),
+      atStart: element.scrollLeft <= 1,
+      atEnd:
+        element.scrollLeft + element.clientWidth >= element.scrollWidth - 1,
+    })
+  }, [])
+  // On first layout and on resize: whether the cards overflow at all.
+  useEffect(() => {
+    const element = track.current
+    if (element === null) return
+    const observer = new ResizeObserver(readPosition)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [readPosition, requests.length])
+  const scrollBy = (direction: 1 | -1) => {
+    const element = track.current
+    if (element === null) return
+    const card = element.firstElementChild?.getBoundingClientRect().width ?? 0
+    element.scrollBy({
+      left: direction * (card + CAROUSEL_GAP),
+      behavior: "smooth",
+    })
+  }
+
+  return (
+    <section className="grid min-w-0 gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium text-muted-foreground">
+          {title} ({requests.length})
+        </h3>
+        {requests.length > 1 && (
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {position.atEnd
+                ? requests.length
+                : Math.min(position.first + 1, requests.length)}{" "}
+              / {requests.length}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("leaves.carousel.previous")}
+              disabled={position.atStart}
+              onClick={() => scrollBy(-1)}
+            >
+              <ChevronLeftIcon />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("leaves.carousel.next")}
+              disabled={position.atEnd}
+              onClick={() => scrollBy(1)}
+            >
+              <ChevronRightIcon />
+            </Button>
+          </div>
+        )}
+      </div>
+      <ul
+        ref={track}
+        onScroll={readPosition}
+        className="flex snap-x snap-mandatory [scrollbar-width:none] gap-3 overflow-x-auto overscroll-x-contain pb-1 [&::-webkit-scrollbar]:hidden"
+      >
+        {requests.map((request) =>
+          renderItem(
+            request,
+            "w-[85%] shrink-0 snap-start rounded-lg border sm:w-64"
+          )
+        )}
+      </ul>
+    </section>
+  )
+}
+
+/** Space between carousel cards, in px: Tailwind's gap-3. */
+const CAROUSEL_GAP = 12
 
 function DeleteRequestDialog({
   request,
@@ -292,7 +404,6 @@ export function TimeOffCard() {
   const { formatShortDate } = useFormatters()
   const requestDialog = useDialogTarget<DialogState>()
   const deleteDialog = useDialogTarget<LeaveRequest>()
-  const [showAllPast, setShowAllPast] = useState(false)
   const [typeFilter, setTypeFilter] = useState("")
   const [toneFilter, setToneFilter] = useState<"" | Tone>("")
 
@@ -341,29 +452,22 @@ export function TimeOffCard() {
   const remoteDay = nextWorkingDay(todayIsoDate(), holidays)
   const isFiltered = typeFilter !== "" || toneFilter !== ""
 
-  const renderList = (
-    title: string,
-    requests: LeaveRequest[],
-    limit = requests.length
-  ) =>
+  const renderRow = (request: LeaveRequest, className?: string) => (
+    <RequestRow
+      key={leaveKey(request)}
+      request={request}
+      showInstance={showInstance}
+      className={className}
+      onEdit={(editing) => requestDialog.open({ editing, preset: null })}
+      onDelete={deleteDialog.open}
+    />
+  )
+  const renderList = (title: string, requests: LeaveRequest[]) =>
     requests.length > 0 && (
       <section className="grid gap-2">
-        <h3 className="text-sm font-medium text-muted-foreground">
-          {title}
-          {requests.length > limit && ` (${requests.length})`}
-        </h3>
+        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
         <ul className="grid divide-y rounded-lg border">
-          {requests.slice(0, limit).map((request) => (
-            <RequestRow
-              key={leaveKey(request)}
-              request={request}
-              showInstance={showInstance}
-              onEdit={(editing) =>
-                requestDialog.open({ editing, preset: null })
-              }
-              onDelete={deleteDialog.open}
-            />
-          ))}
+          {requests.map((request) => renderRow(request))}
         </ul>
       </section>
     )
@@ -483,22 +587,12 @@ export function TimeOffCard() {
               </div>
             )}
             {renderList(t("leaves.upcoming"), upcoming)}
-            {renderList(
-              t("leaves.past"),
-              past,
-              showAllPast ? past.length : PAST_PREVIEW
-            )}
-            {past.length > PAST_PREVIEW && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-fit"
-                onClick={() => setShowAllPast((shown) => !shown)}
-              >
-                {showAllPast
-                  ? t("leaves.showLess")
-                  : t("leaves.showAll", { count: past.length })}
-              </Button>
+            {past.length > 0 && (
+              <RequestCarousel
+                title={t("leaves.past")}
+                requests={past}
+                renderItem={renderRow}
+              />
             )}
             {upcoming.length === 0 && past.length === 0 && (
               <p className="text-sm text-muted-foreground">

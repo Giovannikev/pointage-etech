@@ -557,8 +557,10 @@
       "legendHoliday": "Public holiday",
       "legendPending": "Pending"
     },
-    "showAll": "Show all ({{count}})",
-    "showLess": "Show less"
+    "carousel": {
+      "previous": "Previous requests",
+      "next": "Next requests"
+    }
   },
   "editTimesheet": {
     "title": "Edit timesheet",

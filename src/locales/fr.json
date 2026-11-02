@@ -557,8 +557,10 @@
       "legendHoliday": "Jour férié",
       "legendPending": "En attente"
     },
-    "showAll": "Tout afficher ({{count}})",
-    "showLess": "Afficher moins"
+    "carousel": {
+      "previous": "Demandes précédentes",
+      "next": "Demandes suivantes"
+    }
   },
   "editTimesheet": {
     "title": "Modifier le pointage",
