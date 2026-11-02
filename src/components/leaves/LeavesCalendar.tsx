@@ -209,6 +209,20 @@ export function LeavesCalendar({
     )
   }
 
+  // The legend names the worked time types of the month, as the days do.
+  const workedNames = [
+    ...new Set(
+      requests
+        .filter(
+          (request) =>
+            isWorked(request) &&
+            request.dateFrom <= period.to &&
+            request.dateTo >= period.from
+        )
+        .map((request) => request.leaveTypeName)
+    ),
+  ].sort()
+
   // The phone list: the month's days with something on them.
   const agenda = weeks
     .flat()
@@ -419,7 +433,11 @@ export function LeavesCalendar({
         />
         <LegendItem
           className="bg-remote-work"
-          label={t("leaves.calendar.legendRemote")}
+          label={
+            workedNames.length > 0
+              ? workedNames.join(", ")
+              : t("leaves.calendar.legendRemote")
+          }
         />
         <LegendItem
           className="bg-warning"
