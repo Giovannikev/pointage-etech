@@ -1,5 +1,4 @@
 import { invokeFunction } from "@/services/edgeFunctionClient"
-import { detectTimezone } from "@/services/reminderService"
 import { getSupabaseClient } from "@/services/supabaseClient"
 import { isRecord } from "@/utils/guards"
 
@@ -30,6 +29,17 @@ export interface AutoAttendancePreferences {
 }
 
 export const MAX_RANDOM_WINDOW = 60
+
+/** The browser's time zone, with Madagascar as the fallback. */
+export function detectTimezone(): string {
+  try {
+    return (
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "Indian/Antananarivo"
+    )
+  } catch {
+    return "Indian/Antananarivo"
+  }
+}
 
 export function defaultAutoAttendance(): AutoAttendancePreferences {
   return {
