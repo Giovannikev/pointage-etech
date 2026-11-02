@@ -235,12 +235,25 @@ export function LeavesCalendar() {
                             worked ? WORKED_STYLE : ABSENCE_STYLE,
                             pending && PENDING_STYLE
                           )}
-                          title={`${request.leaveTypeName} · ${t(`leaves.state.${request.state}`)}`}
+                          title={[
+                            `${request.leaveTypeName} · ${t(`leaves.state.${request.state}`)}`,
+                            request.description,
+                          ]
+                            .filter((line) => line !== "")
+                            .join("\n")}
                         >
-                          {request.period !== null
-                            ? `${request.period === "am" ? t("leaves.morning") : t("leaves.afternoon")} · `
-                            : ""}
-                          {request.leaveTypeName}
+                          <span className="block truncate">
+                            {request.period !== null
+                              ? `${request.period === "am" ? t("leaves.morning") : t("leaves.afternoon")} · `
+                              : ""}
+                            {request.leaveTypeName}
+                          </span>
+                          {/* The reason given in the request, under its type. */}
+                          {request.description !== "" && (
+                            <span className="block truncate font-normal opacity-80">
+                              {request.description}
+                            </span>
+                          )}
                         </span>
                       )
                     })}
