@@ -509,9 +509,19 @@ export interface LeaveType {
   /** What a request of this type counts: days, half days or hours. */
   unit: LeaveUnit
   requiresAllocation: boolean
+  /** Worked time, not an absence: remote work, training. */
+  workedTime: boolean
   /** Days (or hours) left, pending requests deducted; null without allocation. */
   remaining: number | null
   allocated: number | null
+}
+
+/** A public holiday of the user's working schedule. */
+export interface PublicHoliday {
+  name: string
+  /** ISO timestamps, UTC. */
+  from: string
+  to: string
 }
 
 export interface LeaveRequest {
@@ -533,6 +543,7 @@ export interface LeaveRequest {
   state: LeaveState
   /** Waiting for approval and not started yet. */
   canDelete: boolean
+  canEdit: boolean
 }
 
 export interface LeaveReference {
@@ -564,6 +575,7 @@ export type TimeOffInstanceResult = InstanceResult<{
   available: boolean
   leaveTypes: LeaveType[]
   requests: LeaveRequest[]
+  holidays: PublicHoliday[]
   truncated: boolean
 }>
 
@@ -583,6 +595,11 @@ export interface GetTimeOffRequest {
 
 export type RequestTimeOffRequest = {
   action: "REQUEST_TIME_OFF"
+} & TimeOffSubmission
+
+export type UpdateTimeOffRequest = {
+  action: "UPDATE_TIME_OFF"
+  leaveId: number
 } & TimeOffSubmission
 
 export type DeleteTimeOffRequest = {
@@ -625,6 +642,7 @@ export type GatewayRequest =
   | PostTaskNoteRequest
   | GetTimeOffRequest
   | RequestTimeOffRequest
+  | UpdateTimeOffRequest
   | DeleteTimeOffRequest
   | GetAttendanceRequest
   | CheckInOutRequest

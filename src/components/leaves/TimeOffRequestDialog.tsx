@@ -1,5 +1,5 @@
 import { useId, useMemo, useState, type FormEvent } from "react"
-import { CalendarPlusIcon, Loader2Icon } from "lucide-react"
+import { CalendarPlusIcon, Loader2Icon, SaveIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { DatePicker } from "@/components/timesheet/DatePicker"
@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useInstanceLabel } from "@/contexts/SettingsContext"
 import { useFormatters } from "@/hooks/useFormatters"
-import { requestTimeOff } from "@/services/odooService"
+import { requestTimeOff, updateTimeOff } from "@/services/odooService"
 import type {
   HalfDayPeriod,
   LeaveRequest,
@@ -28,7 +28,11 @@ import type {
   OdooInstanceIndex,
 } from "@/types/timesheet"
 import { todayIsoDate } from "@/utils/date"
-import { parseHourOfDay } from "@/utils/leaves"
+import {
+  countWorkingDays,
+  formatHourOfDay,
+  parseHourOfDay,
+} from "@/utils/leaves"
 
 type RequestMode = "days" | "half" | "hours"
 
@@ -48,13 +52,36 @@ interface TimeOffRequestDialogProps {
   showInstance: boolean
   /** Instance whose first type is preselected: where the user requests time off. */
   defaultInstance: OdooInstanceIndex | null
+  /** Public holidays by local date: not counted in the balance after. */
+  holidays: Map<string, string>
+  /** The request to change; null for a new one. */
+  editing: LeaveRequest | null
+  /** A new request's type and day, e.g. remote work tomorrow. */
+  preset: { type: LeaveType; date: string } | null
   onOpenChange: (open: boolean) => void
-  onCreated: (request: LeaveRequest) => void
+  onSaved: (request: LeaveRequest) => void
 }
 
-function typeKey(type: LeaveType): string {
-  return `${type.instanceIndex}:${type.leaveTypeId}`
+export function typeKeyOf(request: {
+  instanceIndex: OdooInstanceIndex
+  leaveTypeId: number
+}): string {
+  return `${request.instanceIndex}:${request.leaveTypeId}`
 }
+
+/** What the request takes from the type's balance; null when unknown. */
+function requestedAmount(
+  type: LeaveType,
+  mode: RequestMode,
+  days: number,
+  hours: number | null
+): number | null {
+  if (type.unit === "hour") return mode === "hours" ? hours : null
+  if (mode === "half") return 0.5
+  return mode === "days" ? days : null
+}
+
+const typeKey = typeKeyOf
 
 function TypeOption({ type }: { type: LeaveType }) {
   const { t, i18n } = useTranslation()
@@ -96,26 +123,53 @@ function InstanceTypes({
 }
 
 function RequestForm({
-  leaveTypes,
+  leaveTypes: allTypes,
   showInstance,
   defaultInstance,
-  onCreated,
+  holidays,
+  editing,
+  preset,
+  onSaved,
 }: Omit<TimeOffRequestDialogProps, "open" | "onOpenChange">) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const { formatHours } = useFormatters()
   const fieldId = useId()
+  // A request stays on its instance: only its type can change.
+  const leaveTypes = useMemo(
+    () =>
+      editing === null
+        ? allTypes
+        : allTypes.filter(
+            (type) => type.instanceIndex === editing.instanceIndex
+          ),
+    [allTypes, editing]
+  )
   const [selectedKey, setSelectedKey] = useState(() => {
+    if (editing !== null) return typeKey(editing)
+    if (preset !== null) return typeKey(preset.type)
     const first =
       leaveTypes.find((type) => type.instanceIndex === defaultInstance) ??
       leaveTypes[0]
     return first === undefined ? "" : typeKey(first)
   })
-  const [mode, setMode] = useState<RequestMode>("days")
-  const [dateFrom, setDateFrom] = useState(todayIsoDate)
-  const [dateTo, setDateTo] = useState(todayIsoDate)
-  const [period, setPeriod] = useState<HalfDayPeriod>("am")
-  const [hourFrom, setHourFrom] = useState("08:00")
-  const [hourTo, setHourTo] = useState("10:00")
-  const [description, setDescription] = useState("")
+  const [mode, setMode] = useState<RequestMode>(() =>
+    editing?.period != null
+      ? "half"
+      : editing?.hourFrom != null
+        ? "hours"
+        : "days"
+  )
+  const firstDay = editing?.dateFrom ?? preset?.date ?? todayIsoDate()
+  const [dateFrom, setDateFrom] = useState(firstDay)
+  const [dateTo, setDateTo] = useState(editing?.dateTo ?? firstDay)
+  const [period, setPeriod] = useState<HalfDayPeriod>(editing?.period ?? "am")
+  const [hourFrom, setHourFrom] = useState(
+    editing?.hourFrom != null ? formatHourOfDay(editing.hourFrom) : "08:00"
+  )
+  const [hourTo, setHourTo] = useState(
+    editing?.hourTo != null ? formatHourOfDay(editing.hourTo) : "10:00"
+  )
+  const [description, setDescription] = useState(editing?.description ?? "")
   const [isSending, setIsSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -139,6 +193,33 @@ function RequestForm({
     (activeMode !== "hours" || hoursValid) &&
     !isSending
 
+  // The balance once this request counts: Odoo already deducts the
+  // request being edited, so its own days come back first.
+  let balanceAfter: string | null = null
+  if (type !== undefined && type.remaining !== null && datesValid) {
+    const amount = requestedAmount(
+      type,
+      activeMode,
+      countWorkingDays(dateFrom, dateTo, holidays),
+      hoursValid ? parsedTo - parsedFrom : null
+    )
+    const giveBack =
+      editing !== null &&
+      typeKey(editing) === selectedKey &&
+      type.unit !== "hour"
+        ? editing.days
+        : 0
+    if (amount !== null) {
+      const after = type.remaining + giveBack - amount
+      balanceAfter =
+        type.unit === "hour"
+          ? `${formatHours(after)} ${t("leaves.hoursLeft")}`
+          : `${new Intl.NumberFormat(i18n.resolvedLanguage, {
+              maximumFractionDigits: 2,
+            }).format(after)} ${t("leaves.daysLeft", { count: after })}`
+    }
+  }
+
   const handleSubmit = async (
     event: FormEvent<HTMLFormElement>
   ): Promise<void> => {
@@ -149,7 +230,7 @@ function RequestForm({
     setIsSending(true)
     setError(null)
     try {
-      const created = await requestTimeOff({
+      const submission = {
         instanceIndex: type.instanceIndex,
         leaveTypeId: type.leaveTypeId,
         dateFrom,
@@ -158,8 +239,12 @@ function RequestForm({
         hourFrom: activeMode === "hours" ? parsedFrom : null,
         hourTo: activeMode === "hours" ? parsedTo : null,
         description: description.trim(),
-      })
-      onCreated(created)
+      }
+      onSaved(
+        editing === null
+          ? await requestTimeOff(submission)
+          : await updateTimeOff(editing.leaveId, submission)
+      )
     } catch (sendError) {
       setError(
         sendError instanceof Error ? sendError.message : String(sendError)
@@ -171,8 +256,12 @@ function RequestForm({
   return (
     <form onSubmit={handleSubmit} className="grid gap-4">
       <DialogHeader>
-        <DialogTitle>{t("leaves.newRequest")}</DialogTitle>
-        <DialogDescription>{t("leaves.newRequestHint")}</DialogDescription>
+        <DialogTitle>
+          {editing === null ? t("leaves.newRequest") : t("leaves.editTitle")}
+        </DialogTitle>
+        <DialogDescription>
+          {editing === null ? t("leaves.newRequestHint") : t("leaves.editHint")}
+        </DialogDescription>
       </DialogHeader>
 
       <div className="grid gap-2">
@@ -318,6 +407,12 @@ function RequestForm({
         />
       </div>
 
+      {balanceAfter !== null && (
+        <p className="text-sm text-muted-foreground tabular-nums">
+          {t("leaves.balanceAfter", { balance: balanceAfter })}
+        </p>
+      )}
+
       {error !== null && (
         <p className="text-sm text-destructive" role="alert">
           {error}
@@ -333,10 +428,12 @@ function RequestForm({
         <Button type="submit" disabled={!canSend}>
           {isSending ? (
             <Loader2Icon className="animate-spin" />
-          ) : (
+          ) : editing === null ? (
             <CalendarPlusIcon />
+          ) : (
+            <SaveIcon />
           )}
-          {t("leaves.submit")}
+          {editing === null ? t("leaves.submit") : t("leaves.saveChanges")}
         </Button>
       </DialogFooter>
     </form>
@@ -346,23 +443,13 @@ function RequestForm({
 /** Sends a time off request to Odoo, which checks the balance and overlaps. */
 export function TimeOffRequestDialog({
   open,
-  leaveTypes,
-  showInstance,
-  defaultInstance,
   onOpenChange,
-  onCreated,
+  ...form
 }: TimeOffRequestDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
-        {open && (
-          <RequestForm
-            leaveTypes={leaveTypes}
-            showInstance={showInstance}
-            defaultInstance={defaultInstance}
-            onCreated={onCreated}
-          />
-        )}
+        {open && <RequestForm {...form} />}
       </DialogContent>
     </Dialog>
   )

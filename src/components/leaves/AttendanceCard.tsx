@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Loader2Icon, LogInIcon, LogOutIcon, RefreshCwIcon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  Loader2Icon,
+  LogInIcon,
+  LogOutIcon,
+  RefreshCwIcon,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { CommitPeriodPicker } from "@/components/timesheet/CommitPeriodPicker"
@@ -21,15 +27,75 @@ import { cn } from "@/lib/utils"
 import { useCheckInOut } from "@/hooks/useCheckInOut"
 import { useNow } from "@/hooks/useNow"
 import {
+  expectedHours,
+  type AutoAttendancePreferences,
+} from "@/services/autoAttendanceService"
+import {
   fetchAttendance,
+  fetchTimeOff,
   onAttendanceChanged,
   peekAttendance,
+  peekTimeOff,
 } from "@/services/odooService"
-import type { AttendanceInstanceResult, CommitPeriod } from "@/types/timesheet"
-import { formatDuration, groupAttendanceByDay } from "@/utils/leaves"
+import type {
+  AttendanceInstanceResult,
+  CommitPeriod,
+  TimeOffInstanceResult,
+} from "@/types/timesheet"
+import { todayIsoDate } from "@/utils/date"
+import {
+  expectedPeriodHours,
+  findAttendanceAnomalies,
+  formatDuration,
+  groupAttendanceByDay,
+  holidayDates,
+  workedTimeTypeKeys,
+  type AttendanceAnomaly,
+} from "@/utils/leaves"
 import { getPresetPeriod, isValidPeriod } from "@/utils/period"
 
 type AvailableAttendance = Extract<AttendanceInstanceResult, { ok: true }>
+type AvailableTimeOff = Extract<TimeOffInstanceResult, { ok: true }>
+
+/** A working day's hours without a schedule: 8. */
+const DEFAULT_DAY_HOURS = 8
+
+function AnomalyList({ anomalies }: { anomalies: AttendanceAnomaly[] }) {
+  const { t } = useTranslation()
+  const { formatLongDate, formatTime } = useFormatters()
+  return (
+    <section className="grid gap-2">
+      <h3 className="flex items-center gap-1.5 text-sm font-medium text-warning">
+        <AlertTriangleIcon className="size-4" />
+        {t("leaves.anomalies.title")}
+      </h3>
+      <ul className="grid divide-y rounded-lg border border-warning/40 bg-warning/5">
+        {anomalies.map((anomaly) => (
+          <li
+            key={`${anomaly.kind}:${anomaly.date}`}
+            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 px-3 py-2 text-sm"
+          >
+            <span className="font-medium first-letter:uppercase">
+              {formatLongDate(anomaly.date)}
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {anomaly.kind === "forgottenCheckOut"
+                ? t("leaves.anomalies.forgottenCheckOut", {
+                    time: formatTime(anomaly.checkIn) ?? "",
+                  })
+                : anomaly.kind === "noAttendance"
+                  ? t("leaves.anomalies.noAttendance")
+                  : t("leaves.anomalies.short", {
+                      hours: formatDuration(anomaly.hours),
+                      expected: formatDuration(anomaly.expected),
+                    })}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
 
 function CheckInStatus({
   result,
@@ -94,7 +160,12 @@ function CheckInStatus({
 }
 
 /** Attendance: whether the user is checked in, and the period's hours. */
-export function AttendanceCard() {
+export function AttendanceCard({
+  schedule,
+}: {
+  /** The automatic attendance hours, for the hours expected each day. */
+  schedule: AutoAttendancePreferences | null | undefined
+}) {
   const { t } = useTranslation()
   const { formatLongDate, formatTime } = useFormatters()
   const [period, setPeriod] = useState<CommitPeriod>(() =>
@@ -130,6 +201,36 @@ export function AttendanceCard() {
     [available, period, now]
   )
   const total = days.reduce((sum, day) => sum + day.hours, 0)
+
+  // Time off and holidays: days without attendance that are fine.
+  const timeOffFetcher = useCallback(
+    ({ force }: { force: boolean }) => fetchTimeOff({ force }),
+    []
+  )
+  const timeOff = useCachedQuery("timeOff", timeOffFetcher, peekTimeOff)
+  const today = todayIsoDate()
+  const review = useMemo(() => {
+    if (timeOff.data === undefined || !isValidPeriod(period)) return null
+    const results = timeOff.data.filter(
+      (result): result is AvailableTimeOff => result.ok && result.available
+    )
+    const context = {
+      period,
+      today,
+      requests: results.flatMap((result) => result.requests),
+      workedTypes: workedTimeTypeKeys(
+        results.flatMap((result) => result.leaveTypes)
+      ),
+      holidays: holidayDates(results.flatMap((result) => result.holidays)),
+      expectedHours: (remote: boolean) =>
+        (schedule ? expectedHours(schedule, remote) : null) ??
+        DEFAULT_DAY_HOURS,
+    }
+    return {
+      anomalies: findAttendanceAnomalies({ ...context, days }),
+      expected: expectedPeriodHours(context),
+    }
+  }, [timeOff.data, period, today, schedule, days])
 
   return (
     <Card>
@@ -198,6 +299,30 @@ export function AttendanceCard() {
                     {formatDuration(total)}
                   </span>
                 </p>
+                {review !== null && review.expected > 0 && (
+                  <p className="flex flex-wrap items-baseline justify-between gap-x-2 text-xs text-muted-foreground tabular-nums">
+                    <span>
+                      {t("leaves.expected", {
+                        hours: formatDuration(review.expected),
+                      })}
+                    </span>
+                    <span
+                      className={cn(
+                        "font-medium",
+                        total >= review.expected
+                          ? "text-success"
+                          : "text-warning"
+                      )}
+                    >
+                      {t("leaves.balance", {
+                        hours: `${total >= review.expected ? "+" : "−"}${formatDuration(Math.abs(total - review.expected))}`,
+                      })}
+                    </span>
+                  </p>
+                )}
+                {review !== null && review.anomalies.length > 0 && (
+                  <AnomalyList anomalies={review.anomalies} />
+                )}
                 {days.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     {t("leaves.noAttendance")}

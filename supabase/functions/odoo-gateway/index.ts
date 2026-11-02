@@ -22,16 +22,14 @@
  *   { action: "POST_TASK_NOTE", instanceIndex, taskId, note, approve }
  *   { action: "GET_TIME_OFF", instanceIndex? }
  *   { action: "REQUEST_TIME_OFF", instanceIndex, leaveTypeId, dateFrom, dateTo, period, hourFrom, hourTo, description }
+ *   { action: "UPDATE_TIME_OFF", instanceIndex, leaveId, leaveTypeId, dateFrom, dateTo, period, hourFrom, hourTo, description }
  *   { action: "DELETE_TIME_OFF", instanceIndex, leaveId }
  *   { action: "GET_ATTENDANCE", dateFrom, dateTo, instanceIndex? }
  *   { action: "CHECK_IN_OUT", instanceIndex }
  *   { action: "LIST_TASKS", query?, projects?, assignees?, includeClosed, instanceIndex? }
  *   { action: "LIST_ASSIGNEES", instanceIndex? }
  */
-import {
-  readOwnEmployeeId,
-  toggleAttendance,
-} from "../_shared/attendance.ts"
+import { readOwnEmployeeId, toggleAttendance } from "../_shared/attendance.ts"
 import { HttpError } from "../_shared/errors.ts"
 import { readJsonBody, serveJson } from "../_shared/http.ts"
 import { noteToHtml } from "../_shared/chatterNote.ts"
@@ -327,9 +325,19 @@ interface LeaveType {
   /** What a request of this type counts: days, half days or hours. */
   unit: LeaveUnit
   requiresAllocation: boolean
+  /** Worked time, not an absence: remote work, training (time_type "other"). */
+  workedTime: boolean
   /** Days (or hours) left, pending requests deducted; null without allocation. */
   remaining: number | null
   allocated: number | null
+}
+
+/** A public holiday of the user's working schedule. */
+interface PublicHoliday {
+  name: string
+  /** ISO timestamps, UTC. */
+  from: string
+  to: string
 }
 
 interface LeaveRequest {
@@ -350,6 +358,7 @@ interface LeaveRequest {
   description: string
   state: LeaveState
   canDelete: boolean
+  canEdit: boolean
 }
 
 interface LeaveReference {
@@ -381,6 +390,7 @@ type TimeOffResult = InstanceResult<{
   available: boolean
   leaveTypes: LeaveType[]
   requests: LeaveRequest[]
+  holidays: PublicHoliday[]
   truncated: boolean
 }>
 
@@ -421,6 +431,7 @@ type GatewayRequest =
   | ({ action: "POST_TASK_NOTE" } & TaskNote)
   | { action: "GET_TIME_OFF"; instanceIndex: InstanceIndex | null }
   | ({ action: "REQUEST_TIME_OFF" } & TimeOffRequest)
+  | ({ action: "UPDATE_TIME_OFF" } & TimeOffRequest & { leaveId: number })
   | ({ action: "DELETE_TIME_OFF" } & LeaveReference)
   | ({ action: "GET_ATTENDANCE" } & HistoryQuery)
   | { action: "CHECK_IN_OUT"; instanceIndex: InstanceIndex }
@@ -822,6 +833,17 @@ function parseRequest(body: unknown): GatewayRequest {
 
   if (body.action === "REQUEST_TIME_OFF") {
     return { action: "REQUEST_TIME_OFF", ...parseTimeOffRequest(body) }
+  }
+
+  if (body.action === "UPDATE_TIME_OFF") {
+    if (!isPositiveInteger(body.leaveId)) {
+      throw new HttpError('"leaveId" is required.', 400)
+    }
+    return {
+      action: "UPDATE_TIME_OFF",
+      ...parseTimeOffRequest(body),
+      leaveId: body.leaveId,
+    }
   }
 
   if (body.action === "DELETE_TIME_OFF") {
@@ -2706,6 +2728,8 @@ const LEAVE_FIELDS = [
 ]
 /** Requests shown: those ending in the last year, and every future one. */
 const LEAVE_HISTORY_DAYS = 366
+/** Public holidays shown: from a year ago to a year ahead. */
+const HOLIDAY_SPAN_DAYS = 366
 
 function readLeaveRequest(
   record: unknown,
@@ -2735,6 +2759,10 @@ function readLeaveRequest(
     isSingleHalfDay && (fromPeriod === "am" || fromPeriod === "pm")
       ? fromPeriod
       : null
+  // Odoo lets an employee change or delete a request only before it is
+  // approved and before it starts.
+  const isOpen =
+    (state === "confirm" || state === "validate1") && dateFrom >= today
   return {
     instanceIndex,
     leaveId: record.id,
@@ -2752,10 +2780,8 @@ function readLeaveRequest(
         : null,
     description: typeof record.name === "string" ? record.name : "",
     state,
-    // Odoo lets an employee delete a request only before it is approved
-    // and before it starts.
-    canDelete:
-      (state === "confirm" || state === "validate1") && dateFrom >= today,
+    canDelete: isOpen,
+    canEdit: isOpen,
   }
 }
 
@@ -2803,6 +2829,7 @@ async function readLeaveTypes(
     "requires_allocation",
     "request_unit",
     "has_valid_allocation",
+    "time_type",
   ].filter((field) => available.has(field))
   const [records, balances] = await Promise.all([
     executeKw(session, "hr.leave.type", "search_read", [[]], {
@@ -2835,10 +2862,76 @@ async function readLeaveTypes(
           name: record.name,
           unit,
           requiresAllocation: needsAllocation,
+          workedTime: record.time_type === "other",
           remaining: needsAllocation
             ? readNumber(balance?.virtual_remaining_leaves)
             : null,
           allocated: needsAllocation ? readNumber(balance?.max_leaves) : null,
+        },
+      ]
+    }
+  )
+}
+
+/**
+ * Public holidays (resource.calendar.leaves without a resource) between the
+ * dates. Those of another working schedule than the user's are left out
+ * when Odoo tells the user's; none without access to them.
+ */
+async function readPublicHolidays(
+  session: OdooSession,
+  since: string,
+  until: string
+): Promise<PublicHoliday[]> {
+  let records: unknown
+  let calendarId: number | null = null
+  try {
+    const [found, users] = await Promise.all([
+      executeKw(
+        session,
+        "resource.calendar.leaves",
+        "search_read",
+        [
+          [
+            ["resource_id", "=", false],
+            ["date_from", "<=", `${until} 23:59:59`],
+            ["date_to", ">=", `${since} 00:00:00`],
+          ],
+        ],
+        { fields: ["name", "date_from", "date_to", "calendar_id"] }
+      ),
+      executeKw(session, "res.users", "read", [[session.uid]], {
+        fields: ["resource_calendar_id"],
+      }).catch(() => null),
+    ])
+    records = found
+    const user = Array.isArray(users) ? users[0] : undefined
+    calendarId = isRecord(user)
+      ? (readMany2one(user.resource_calendar_id)?.id ?? null)
+      : null
+  } catch (error) {
+    if (error instanceof OdooRpcError) return []
+    throw error
+  }
+  return (Array.isArray(records) ? records : []).flatMap(
+    (record): PublicHoliday[] => {
+      if (!isRecord(record)) return []
+      const calendar = readMany2one(record.calendar_id)
+      if (
+        calendar !== null &&
+        calendarId !== null &&
+        calendar.id !== calendarId
+      ) {
+        return []
+      }
+      const from = readDeadline(record.date_from)
+      const to = readDeadline(record.date_to)
+      if (from === null || to === null) return []
+      return [
+        {
+          name: typeof record.name === "string" ? record.name : "",
+          from,
+          to,
         },
       ]
     }
@@ -2859,6 +2952,7 @@ function getTimeOff(
           available: false,
           leaveTypes: [],
           requests: [],
+          holidays: [],
           truncated: false,
         }
       }
@@ -2866,7 +2960,10 @@ function getTimeOff(
       const since = new Date(Date.now() - LEAVE_HISTORY_DAYS * MS_PER_DAY)
         .toISOString()
         .slice(0, 10)
-      const [leaveTypes, records] = await Promise.all([
+      const until = new Date(Date.now() + HOLIDAY_SPAN_DAYS * MS_PER_DAY)
+        .toISOString()
+        .slice(0, 10)
+      const [leaveTypes, records, holidays] = await Promise.all([
         readLeaveTypes(session, index),
         executeKw(
           session,
@@ -2884,11 +2981,13 @@ function getTimeOff(
             order: "request_date_from desc, id desc",
           }
         ),
+        readPublicHolidays(session, since, until),
       ])
       const raw = readRecords(records, session, "time off")
       return {
         available: true,
         leaveTypes,
+        holidays,
         requests: raw.flatMap(
           (record) => readLeaveRequest(record, index, today) ?? []
         ),
@@ -2928,33 +3027,21 @@ async function readOwnLeave(
   return leave
 }
 
-/**
- * Creates a time off request for the user's own employee; Odoo checks the
- * balance, overlaps and the type's unit.
- */
-async function requestTimeOff(
-  instances: OdooInstanceSettings[],
-  request: TimeOffRequest
-): Promise<LeaveRequest> {
-  const { instanceIndex, leaveTypeId, dateFrom, description } = request
-  const session = await createSessionPool(instances)(instanceIndex)
-  const [leaveFields, employeeId] = await Promise.all([
-    getModelFields(session, "hr.leave"),
-    readOwnEmployeeId(session),
-  ])
-  if (employeeId === null) {
-    throw new HttpError(
-      `Your user has no employee on ${session.connection.label}.`,
-      409
-    )
-  }
+/** The hr.leave values of a request: its type, days, half day or hours. */
+function timeOffValues(
+  request: TimeOffRequest,
+  leaveFields: Set<string>
+): Record<string, unknown> {
+  const { dateFrom } = request
   const values: Record<string, unknown> = {
-    // Odoo only fills it in its own form: an API call must send it.
-    employee_id: employeeId,
-    holiday_status_id: leaveTypeId,
+    holiday_status_id: request.leaveTypeId,
     request_date_from: dateFrom,
     request_date_to: request.dateTo,
-    name: description,
+    name: request.description,
+  }
+  // Explicit, so an edit from half days or hours back to days clears them.
+  for (const field of ["request_unit_half", "request_unit_hours"]) {
+    if (leaveFields.has(field)) values[field] = false
   }
   if (request.period !== null) {
     values.request_unit_half = true
@@ -2969,6 +3056,34 @@ async function requestTimeOff(
     values.request_hour_to = request.hourTo
     values.request_date_to = dateFrom
   }
+  return values
+}
+
+/**
+ * Creates a time off request for the user's own employee; Odoo checks the
+ * balance, overlaps and the type's unit.
+ */
+async function requestTimeOff(
+  instances: OdooInstanceSettings[],
+  request: TimeOffRequest
+): Promise<LeaveRequest> {
+  const { instanceIndex } = request
+  const session = await createSessionPool(instances)(instanceIndex)
+  const [leaveFields, employeeId] = await Promise.all([
+    getModelFields(session, "hr.leave"),
+    readOwnEmployeeId(session),
+  ])
+  if (employeeId === null) {
+    throw new HttpError(
+      `Your user has no employee on ${session.connection.label}.`,
+      409
+    )
+  }
+  const values: Record<string, unknown> = {
+    // Odoo only fills it in its own form: an API call must send it.
+    employee_id: employeeId,
+    ...timeOffValues(request, leaveFields),
+  }
   const created = await asConflict(
     executeKw(session, "hr.leave", "create", [values])
   )
@@ -2976,6 +3091,30 @@ async function requestTimeOff(
   if (!isPositiveInteger(leaveId)) {
     throw new HttpError("Odoo didn't confirm the time off request.", 502)
   }
+  return readOwnLeave(session, instanceIndex, leaveId)
+}
+
+/** Changes one of the user's requests that isn't approved nor started yet. */
+async function updateTimeOff(
+  instances: OdooInstanceSettings[],
+  request: TimeOffRequest & { leaveId: number }
+): Promise<LeaveRequest> {
+  const { instanceIndex, leaveId } = request
+  const session = await createSessionPool(instances)(instanceIndex)
+  const leave = await readOwnLeave(session, instanceIndex, leaveId)
+  if (!leave.canEdit) {
+    throw new HttpError(
+      "Only requests waiting for approval and not started yet can be changed.",
+      409
+    )
+  }
+  const leaveFields = await getModelFields(session, "hr.leave")
+  await asConflict(
+    executeKw(session, "hr.leave", "write", [
+      [leaveId],
+      timeOffValues(request, leaveFields),
+    ])
+  )
   return readOwnLeave(session, instanceIndex, leaveId)
 }
 
@@ -3170,6 +3309,8 @@ serveJson("odoo-gateway", {
         }
       case "REQUEST_TIME_OFF":
         return { request: await requestTimeOff(instances, gatewayRequest) }
+      case "UPDATE_TIME_OFF":
+        return { request: await updateTimeOff(instances, gatewayRequest) }
       case "DELETE_TIME_OFF":
         return { deleted: await deleteTimeOff(instances, gatewayRequest) }
       case "GET_ATTENDANCE":

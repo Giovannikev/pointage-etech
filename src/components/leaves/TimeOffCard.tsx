@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState } from "react"
 import {
   CalendarPlusIcon,
+  HouseIcon,
   Loader2Icon,
+  PencilIcon,
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -47,13 +49,32 @@ import type {
 } from "@/types/timesheet"
 import { todayIsoDate } from "@/utils/date"
 import {
+  filterRequests,
+  findRemoteWorkType,
   formatHourOfDay,
+  holidayDates,
   leaveKey,
   leaveStateTone,
+  nextWorkingDay,
   splitRequests,
 } from "@/utils/leaves"
 
 type AvailableTimeOff = Extract<TimeOffInstanceResult, { ok: true }>
+
+type Tone = ReturnType<typeof leaveStateTone>
+const TONES: readonly Tone[] = ["pending", "approved", "refused", "canceled"]
+
+/** What the request dialog opens on: a new request, a preset one, or an edit. */
+interface DialogState {
+  editing: LeaveRequest | null
+  preset: { type: LeaveType; date: string } | null
+}
+
+/** Past requests shown before "Show all": the list can hold a year. */
+const PAST_PREVIEW = 3
+
+const SELECT_CLASS =
+  "h-8 min-w-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
 
 const TONE_STYLES = {
   pending: "bg-warning/12 text-warning",
@@ -104,10 +125,12 @@ function BalanceTile({
 function RequestRow({
   request,
   showInstance,
+  onEdit,
   onDelete,
 }: {
   request: LeaveRequest
   showInstance: boolean
+  onEdit: (request: LeaveRequest) => void
   onDelete: (request: LeaveRequest) => void
 }) {
   const { t } = useTranslation()
@@ -149,6 +172,18 @@ function RequestRow({
           </p>
         )}
       </div>
+      {request.canEdit && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0 text-muted-foreground"
+          aria-label={t("leaves.edit")}
+          title={t("leaves.edit")}
+          onClick={() => onEdit(request)}
+        >
+          <PencilIcon />
+        </Button>
+      )}
       {request.canDelete && (
         <Button
           variant="ghost"
@@ -254,8 +289,12 @@ export function TimeOffCard() {
   )
   const query = useCachedQuery("timeOff", fetcher, peekTimeOff)
   const { data, error, isLoading, isRefreshing, refresh } = query
-  const [isRequesting, setIsRequesting] = useState(false)
+  const { formatShortDate } = useFormatters()
+  const requestDialog = useDialogTarget<DialogState>()
   const deleteDialog = useDialogTarget<LeaveRequest>()
+  const [showAllPast, setShowAllPast] = useState(false)
+  const [typeFilter, setTypeFilter] = useState("")
+  const [toneFilter, setToneFilter] = useState<"" | Tone>("")
 
   const available = useMemo(
     () =>
@@ -277,25 +316,51 @@ export function TimeOffCard() {
       .flatMap((result) => result.requests)
       .sort((a, b) => b.dateFrom.localeCompare(a.dateFrom))[0]?.instanceIndex ??
     null
+  const allRequests = useMemo(
+    () => available.flatMap((result) => result.requests),
+    [available]
+  )
+  const typeNames = useMemo(
+    () =>
+      [...new Set(allRequests.map((request) => request.leaveTypeName))].sort(),
+    [allRequests]
+  )
   const { upcoming, past } = useMemo(
     () =>
       splitRequests(
-        available.flatMap((result) => result.requests),
+        filterRequests(allRequests, typeFilter, toneFilter),
         todayIsoDate()
       ),
+    [allRequests, typeFilter, toneFilter]
+  )
+  const holidays = useMemo(
+    () => holidayDates(available.flatMap((result) => result.holidays)),
     [available]
   )
+  const remoteType = findRemoteWorkType(leaveTypes)
+  const remoteDay = nextWorkingDay(todayIsoDate(), holidays)
+  const isFiltered = typeFilter !== "" || toneFilter !== ""
 
-  const renderList = (title: string, requests: LeaveRequest[]) =>
+  const renderList = (
+    title: string,
+    requests: LeaveRequest[],
+    limit = requests.length
+  ) =>
     requests.length > 0 && (
       <section className="grid gap-2">
-        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
+        <h3 className="text-sm font-medium text-muted-foreground">
+          {title}
+          {requests.length > limit && ` (${requests.length})`}
+        </h3>
         <ul className="grid divide-y rounded-lg border">
-          {requests.map((request) => (
+          {requests.slice(0, limit).map((request) => (
             <RequestRow
               key={leaveKey(request)}
               request={request}
               showInstance={showInstance}
+              onEdit={(editing) =>
+                requestDialog.open({ editing, preset: null })
+              }
               onDelete={deleteDialog.open}
             />
           ))}
@@ -344,14 +409,35 @@ export function TimeOffCard() {
           </p>
         ) : (
           <>
-            <Button
-              className="w-fit max-sm:w-full"
-              disabled={leaveTypes.length === 0}
-              onClick={() => setIsRequesting(true)}
-            >
-              <CalendarPlusIcon />
-              {t("leaves.newRequest")}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="max-sm:w-full"
+                disabled={leaveTypes.length === 0}
+                onClick={() =>
+                  requestDialog.open({ editing: null, preset: null })
+                }
+              >
+                <CalendarPlusIcon />
+                {t("leaves.newRequest")}
+              </Button>
+              {remoteType !== null && (
+                <Button
+                  variant="outline"
+                  className="max-sm:w-full"
+                  onClick={() =>
+                    requestDialog.open({
+                      editing: null,
+                      preset: { type: remoteType, date: remoteDay },
+                    })
+                  }
+                >
+                  <HouseIcon />
+                  {t("leaves.remoteTomorrow", {
+                    day: formatShortDate(remoteDay),
+                  })}
+                </Button>
+              )}
+            </div>
             {balances.length > 0 && (
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {balances.map((type) => (
@@ -363,11 +449,60 @@ export function TimeOffCard() {
                 ))}
               </div>
             )}
+            {allRequests.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <select
+                  aria-label={t("leaves.filterType")}
+                  className={SELECT_CLASS}
+                  value={typeFilter}
+                  onChange={(event) => setTypeFilter(event.target.value)}
+                >
+                  <option value="">{t("leaves.allTypes")}</option>
+                  {typeNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  aria-label={t("leaves.filterState")}
+                  className={SELECT_CLASS}
+                  value={toneFilter}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setToneFilter(TONES.find((tone) => tone === value) ?? "")
+                  }}
+                >
+                  <option value="">{t("leaves.allStates")}</option>
+                  {TONES.map((tone) => (
+                    <option key={tone} value={tone}>
+                      {t(`leaves.tone.${tone}`)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {renderList(t("leaves.upcoming"), upcoming)}
-            {renderList(t("leaves.past"), past)}
+            {renderList(
+              t("leaves.past"),
+              past,
+              showAllPast ? past.length : PAST_PREVIEW
+            )}
+            {past.length > PAST_PREVIEW && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-fit"
+                onClick={() => setShowAllPast((shown) => !shown)}
+              >
+                {showAllPast
+                  ? t("leaves.showLess")
+                  : t("leaves.showAll", { count: past.length })}
+              </Button>
+            )}
             {upcoming.length === 0 && past.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                {t("leaves.noRequests")}
+                {isFiltered ? t("leaves.noMatch") : t("leaves.noRequests")}
               </p>
             )}
           </>
@@ -375,16 +510,21 @@ export function TimeOffCard() {
       </CardContent>
 
       <TimeOffRequestDialog
-        open={isRequesting}
+        open={requestDialog.isOpen}
         leaveTypes={leaveTypes}
         showInstance={showInstance}
         defaultInstance={defaultInstance}
-        onOpenChange={setIsRequesting}
-        onCreated={(request) => {
-          setIsRequesting(false)
-          toast.success(t("leaves.requestSent"), {
-            description: request.leaveTypeName,
-          })
+        holidays={holidays}
+        editing={requestDialog.target?.editing ?? null}
+        preset={requestDialog.target?.preset ?? null}
+        onOpenChange={(open) => !open && requestDialog.close()}
+        onSaved={(request) => {
+          const wasEditing = requestDialog.target?.editing != null
+          requestDialog.close()
+          toast.success(
+            wasEditing ? t("leaves.updated") : t("leaves.requestSent"),
+            { description: request.leaveTypeName }
+          )
           // Balances changed too: read them again.
           refresh()
         }}

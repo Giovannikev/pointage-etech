@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { Attendance, LeaveRequest } from "@/types/timesheet"
+import type { Attendance, LeaveRequest, LeaveType } from "@/types/timesheet"
 import {
   attendanceHours,
   formatDuration,
@@ -9,6 +9,15 @@ import {
   leaveStateTone,
   parseHourOfDay,
   splitRequests,
+  countWorkingDays,
+  expectedPeriodHours,
+  filterRequests,
+  findAttendanceAnomalies,
+  findRemoteWorkType,
+  holidayDates,
+  isRemoteDay,
+  monthWeeks,
+  nextWorkingDay,
 } from "@/utils/leaves"
 
 function attendance(overrides: Partial<Attendance>): Attendance {
@@ -37,6 +46,7 @@ function request(overrides: Partial<LeaveRequest>): LeaveRequest {
     description: "",
     state: "validate",
     canDelete: false,
+    canEdit: false,
     ...overrides,
   }
 }
@@ -141,5 +151,192 @@ describe("leaveStateTone", () => {
     expect(leaveStateTone("validate")).toBe("approved")
     expect(leaveStateTone("refuse")).toBe("refused")
     expect(leaveStateTone("cancel")).toBe("canceled")
+  })
+})
+
+function leaveType(overrides: Partial<LeaveType>): LeaveType {
+  return {
+    instanceIndex: 2,
+    leaveTypeId: 1,
+    name: "Congés payés",
+    unit: "day",
+    requiresAllocation: true,
+    workedTime: false,
+    remaining: 10,
+    allocated: 20,
+    ...overrides,
+  }
+}
+
+// Monday 2026-10-26 to Friday 2026-10-30, in Madagascar (UTC+3).
+const WEEK = { from: "2026-10-26", to: "2026-11-01" }
+const REMOTE = new Set(["2:9"])
+
+describe("holidays and working days", () => {
+  it("lists the local days of a public holiday", () => {
+    const dates = holidayDates([
+      {
+        name: "Toussaint",
+        from: "2026-10-31T21:00:00Z",
+        to: "2026-11-01T20:59:59Z",
+      },
+    ])
+    expect([...dates.keys()]).toEqual(["2026-11-01"])
+  })
+
+  it("skips weekends and holidays", () => {
+    const holidays = new Map([["2026-10-26", "Fête"]])
+    expect(nextWorkingDay("2026-10-23", holidays)).toBe("2026-10-27")
+    expect(countWorkingDays("2026-10-23", "2026-10-28", holidays)).toBe(3)
+  })
+
+  it("lays a month out in weeks from Monday", () => {
+    const weeks = monthWeeks("2026-11")
+    expect(weeks[0][0]).toBe("2026-10-26")
+    expect(weeks.at(-1)?.at(-1)).toBe("2026-12-06")
+    expect(weeks.every((week) => week.length === 7)).toBe(true)
+  })
+})
+
+describe("remote work", () => {
+  const remote = (overrides: Partial<LeaveRequest>) =>
+    request({
+      leaveTypeId: 9,
+      dateFrom: "2026-10-27",
+      dateTo: "2026-10-27",
+      ...overrides,
+    })
+
+  it("counts a day or an afternoon, not a morning", () => {
+    expect(isRemoteDay([remote({})], REMOTE, "2026-10-27")).toBe(true)
+    expect(isRemoteDay([remote({ period: "pm" })], REMOTE, "2026-10-27")).toBe(
+      true
+    )
+    expect(isRemoteDay([remote({ period: "am" })], REMOTE, "2026-10-27")).toBe(
+      false
+    )
+    expect(
+      isRemoteDay([remote({ state: "refuse" })], REMOTE, "2026-10-27")
+    ).toBe(false)
+    expect(isRemoteDay([remote({})], new Set(), "2026-10-27")).toBe(false)
+  })
+
+  it("finds the remote work type", () => {
+    const types = [
+      leaveType({}),
+      leaveType({ leaveTypeId: 8, name: "Formation", workedTime: true }),
+      leaveType({ leaveTypeId: 9, name: "Télétravail", workedTime: true }),
+    ]
+    expect(findRemoteWorkType(types)?.leaveTypeId).toBe(9)
+    expect(findRemoteWorkType(types.slice(0, 2))?.leaveTypeId).toBe(8)
+    expect(findRemoteWorkType(types.slice(0, 1))).toBeNull()
+  })
+})
+
+describe("findAttendanceAnomalies", () => {
+  const day = (date: string, hours: number, open = false) => ({
+    date,
+    hours,
+    attendances: [
+      attendance({
+        checkIn: `${date}T06:00:00Z`,
+        checkOut: open ? null : `${date}T14:00:00Z`,
+      }),
+    ],
+  })
+
+  it("flags forgotten check-outs, missing and short days", () => {
+    const anomalies = findAttendanceAnomalies({
+      days: [
+        day("2026-10-26", 8),
+        day("2026-10-27", 6),
+        day("2026-10-28", 3, true),
+      ],
+      period: WEEK,
+      today: "2026-10-30",
+      requests: [],
+      workedTypes: REMOTE,
+      holidays: new Map(),
+      expectedHours: (remote) => (remote ? 8.5 : 8),
+    })
+    expect(anomalies).toEqual([
+      { kind: "noAttendance", date: "2026-10-29" },
+      {
+        kind: "forgottenCheckOut",
+        date: "2026-10-28",
+        checkIn: "2026-10-28T06:00:00Z",
+      },
+      { kind: "short", date: "2026-10-27", hours: 6, expected: 8 },
+    ])
+  })
+
+  it("leaves days off, holidays and remote hours alone", () => {
+    const anomalies = findAttendanceAnomalies({
+      days: [day("2026-10-26", 8)],
+      period: WEEK,
+      today: "2026-10-30",
+      requests: [
+        request({ dateFrom: "2026-10-27", dateTo: "2026-10-28" }),
+        request({
+          leaveTypeId: 9,
+          dateFrom: "2026-10-26",
+          dateTo: "2026-10-26",
+        }),
+      ],
+      workedTypes: REMOTE,
+      holidays: new Map([["2026-10-29", "Fête"]]),
+      expectedHours: (remote) => (remote ? 8.5 : 8),
+    })
+    expect(anomalies).toEqual([
+      { kind: "short", date: "2026-10-26", hours: 8, expected: 8.5 },
+    ])
+  })
+})
+
+describe("filterRequests", () => {
+  it("filters by type and state", () => {
+    const requests = [
+      request({ leaveId: 1 }),
+      request({ leaveId: 2, state: "confirm" }),
+      request({ leaveId: 3, leaveTypeName: "Maladie" }),
+    ]
+    expect(
+      filterRequests(requests, "Congés payés", "").map((r) => r.leaveId)
+    ).toEqual([1, 2])
+    expect(
+      filterRequests(requests, "", "pending").map((r) => r.leaveId)
+    ).toEqual([2])
+  })
+})
+
+describe("expectedPeriodHours", () => {
+  it("counts working days, less time off and holidays", () => {
+    expect(
+      expectedPeriodHours({
+        period: WEEK,
+        today: "2026-11-02",
+        requests: [
+          request({
+            dateFrom: "2026-10-27",
+            dateTo: "2026-10-27",
+            period: "am",
+          }),
+          request({
+            dateFrom: "2026-10-28",
+            dateTo: "2026-10-28",
+            hourFrom: 9,
+            hourTo: 11,
+          }),
+          request({
+            leaveTypeId: 9,
+            dateFrom: "2026-10-30",
+            dateTo: "2026-10-30",
+          }),
+        ],
+        workedTypes: REMOTE,
+        holidays: new Map([["2026-10-29", "Fête"]]),
+        expectedHours: (remote) => (remote ? 8.5 : 8),
+      })
+    ).toBe(8 + 4 + 6 + 8.5)
   })
 })

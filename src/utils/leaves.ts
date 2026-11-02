@@ -3,9 +3,11 @@ import type {
   CommitPeriod,
   LeaveRequest,
   LeaveState,
+  LeaveType,
   OdooInstanceIndex,
+  PublicHoliday,
 } from "@/types/timesheet"
-import { toLocalIsoDate } from "@/utils/date"
+import { addDays, countDays, startOfDay, toLocalIsoDate } from "@/utils/date"
 import { isInPeriod } from "@/utils/period"
 
 /** One local day of attendances, newest day first. */
@@ -110,4 +112,249 @@ export function leaveKey(request: {
   leaveId: number
 }): string {
   return `${request.instanceIndex}:${request.leaveId}`
+}
+
+/** A refused or cancelled request takes no time. */
+export function isActiveRequest(request: LeaveRequest): boolean {
+  return request.state !== "refuse" && request.state !== "cancel"
+}
+
+function covers(request: LeaveRequest, date: string): boolean {
+  return request.dateFrom <= date && date <= request.dateTo
+}
+
+/** Monday to Friday. */
+export function isWeekday(date: string): boolean {
+  const day = startOfDay(date).getDay()
+  return day !== 0 && day !== 6
+}
+
+/** The local dates each public holiday covers. */
+export function holidayDates(holidays: PublicHoliday[]): Map<string, string> {
+  const dates = new Map<string, string>()
+  for (const holiday of holidays) {
+    const first = toLocalIsoDate(holiday.from)
+    // Odoo ends a holiday at 23:59:59 local or at the next midnight.
+    const end = new Date(new Date(holiday.to).getTime() - 1000).toISOString()
+    const last = toLocalIsoDate(end)
+    for (let date = first; date <= last; date = addDays(date, 1)) {
+      dates.set(date, holiday.name)
+    }
+  }
+  return dates
+}
+
+/** The ids ("instance:type") of the worked time types: remote work, training. */
+export function workedTimeTypeKeys(types: LeaveType[]): Set<string> {
+  return new Set(
+    types
+      .filter((type) => type.workedTime)
+      .map((type) => `${type.instanceIndex}:${type.leaveTypeId}`)
+  )
+}
+
+function isWorkedTime(request: LeaveRequest, workedTypes: Set<string>) {
+  return workedTypes.has(`${request.instanceIndex}:${request.leaveTypeId}`)
+}
+
+/** Absences (not worked time) covering `date`. */
+export function absencesOn(
+  requests: LeaveRequest[],
+  workedTypes: Set<string>,
+  date: string
+): LeaveRequest[] {
+  return requests.filter(
+    (request) =>
+      isActiveRequest(request) &&
+      !isWorkedTime(request, workedTypes) &&
+      covers(request, date)
+  )
+}
+
+/**
+ * True when remote work covers the end of `date`, as the automatic
+ * check-out sees it: a whole day, an afternoon, or hours until the evening.
+ */
+export function isRemoteDay(
+  requests: LeaveRequest[],
+  workedTypes: Set<string>,
+  date: string,
+  /** The office check-out, in hours: 17.5 for 17:30. */
+  dayEnd = 17.5
+): boolean {
+  return requests.some(
+    (request) =>
+      isActiveRequest(request) &&
+      isWorkedTime(request, workedTypes) &&
+      covers(request, date) &&
+      request.period !== "am" &&
+      (request.hourTo === null || request.hourTo >= dayEnd)
+  )
+}
+
+export type AttendanceAnomaly =
+  | { kind: "forgottenCheckOut"; date: string; checkIn: string }
+  | { kind: "noAttendance"; date: string }
+  | { kind: "short"; date: string; hours: number; expected: number }
+
+/** Below this many hours under the expected day, a day isn't flagged. */
+const SHORT_DAY_TOLERANCE = 0.25
+
+/**
+ * Days of the period, before today, that need a look: an attendance never
+ * checked out, a working day without any attendance, or a day shorter than
+ * expected. Days off, public holidays and weekends are left alone.
+ */
+export function findAttendanceAnomalies({
+  days,
+  period,
+  today,
+  requests,
+  workedTypes,
+  holidays,
+  expectedHours,
+}: {
+  days: AttendanceDay[]
+  period: CommitPeriod
+  today: string
+  requests: LeaveRequest[]
+  workedTypes: Set<string>
+  holidays: Map<string, string>
+  /** Hours expected on a working day, remote or not. */
+  expectedHours: (remote: boolean) => number
+}): AttendanceAnomaly[] {
+  const anomalies: AttendanceAnomaly[] = []
+  const byDate = new Map(days.map((day) => [day.date, day]))
+  const last = period.to < today ? period.to : addDays(today, -1)
+  for (let date = period.from; date <= last; date = addDays(date, 1)) {
+    const day = byDate.get(date)
+    const open = day?.attendances.find(
+      (attendance) => attendance.checkOut === null
+    )
+    if (open !== undefined) {
+      anomalies.push({ kind: "forgottenCheckOut", date, checkIn: open.checkIn })
+      continue
+    }
+    if (
+      !isWeekday(date) ||
+      holidays.has(date) ||
+      absencesOn(requests, workedTypes, date).length > 0
+    ) {
+      continue
+    }
+    if (day === undefined) {
+      anomalies.push({ kind: "noAttendance", date })
+      continue
+    }
+    const expected = expectedHours(isRemoteDay(requests, workedTypes, date))
+    if (day.hours < expected - SHORT_DAY_TOLERANCE) {
+      anomalies.push({ kind: "short", date, hours: day.hours, expected })
+    }
+  }
+  return anomalies.sort((a, b) => b.date.localeCompare(a.date))
+}
+
+/** The first working day after `date`: not a weekend nor a public holiday. */
+export function nextWorkingDay(
+  date: string,
+  holidays: Map<string, string>
+): string {
+  let next = addDays(date, 1)
+  while (!isWeekday(next) || holidays.has(next)) next = addDays(next, 1)
+  return next
+}
+
+/** The remote work type: a worked time type named so, or the only one. */
+export function findRemoteWorkType(types: LeaveType[]): LeaveType | null {
+  const worked = types.filter((type) => type.workedTime)
+  return (
+    worked.find((type) =>
+      /t[ée]l[ée]\s*travail|remote|home|domicile/i.test(type.name)
+    ) ?? (worked.length === 1 ? worked[0] : null)
+  )
+}
+
+/** Working days from `from` to `to`, both included: no weekend nor holiday. */
+export function countWorkingDays(
+  from: string,
+  to: string,
+  holidays: Map<string, string>
+): number {
+  let count = 0
+  for (let index = 0; index < countDays(from, to); index += 1) {
+    const date = addDays(from, index)
+    if (isWeekday(date) && !holidays.has(date)) count += 1
+  }
+  return count
+}
+
+/** The weeks (Monday first) showing a month ("2026-11"), as ISO dates. */
+export function monthWeeks(month: string): string[][] {
+  const first = `${month}-01`
+  // getDay: 0 is Sunday; step back to the Monday of the first week.
+  const offset = (startOfDay(first).getDay() + 6) % 7
+  let date = addDays(first, -offset)
+  const weeks: string[][] = []
+  do {
+    const week: string[] = []
+    for (let day = 0; day < 7; day += 1) {
+      week.push(date)
+      date = addDays(date, 1)
+    }
+    weeks.push(week)
+  } while (date.slice(0, 7) === month)
+  return weeks
+}
+
+/** Requests whose type and state match the filters ("" for any). */
+export function filterRequests(
+  requests: LeaveRequest[],
+  typeName: string,
+  tone: "" | ReturnType<typeof leaveStateTone>
+): LeaveRequest[] {
+  return requests.filter(
+    (request) =>
+      (typeName === "" || request.leaveTypeName === typeName) &&
+      (tone === "" || leaveStateTone(request.state) === tone)
+  )
+}
+
+/**
+ * Hours expected over the period, up to today: each working day's hours,
+ * less its time off (half a day for a half day, the hours of an hour
+ * request), none on public holidays.
+ */
+export function expectedPeriodHours({
+  period,
+  today,
+  requests,
+  workedTypes,
+  holidays,
+  expectedHours,
+}: {
+  period: CommitPeriod
+  today: string
+  requests: LeaveRequest[]
+  workedTypes: Set<string>
+  holidays: Map<string, string>
+  expectedHours: (remote: boolean) => number
+}): number {
+  let total = 0
+  const last = period.to < today ? period.to : today
+  for (let date = period.from; date <= last; date = addDays(date, 1)) {
+    if (!isWeekday(date) || holidays.has(date)) continue
+    const day = expectedHours(isRemoteDay(requests, workedTypes, date))
+    const off = absencesOn(requests, workedTypes, date).reduce(
+      (sum, request) =>
+        sum +
+        (request.period !== null
+          ? day / 2
+          : request.hourFrom !== null && request.hourTo !== null
+            ? request.hourTo - request.hourFrom
+            : day),
+      0
+    )
+    total += Math.max(0, day - off)
+  }
+  return total
 }

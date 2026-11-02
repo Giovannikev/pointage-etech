@@ -15,6 +15,7 @@ import type {
   LeaveReference,
   LeaveRequest,
   LeaveType,
+  PublicHoliday,
   TimeOffInstanceResult,
   TimeOffSubmission,
   CommitPeriod,
@@ -1086,6 +1087,7 @@ function toLeaveType(value: unknown): LeaveType {
       name: value.name,
       unit: value.unit as LeaveType["unit"],
       requiresAllocation: value.requiresAllocation === true,
+      workedTime: value.workedTime === true,
       remaining: value.remaining,
       allocated: value.allocated,
     }
@@ -1126,7 +1128,20 @@ function toLeaveRequest(value: unknown): LeaveRequest {
       description: value.description,
       state: value.state as LeaveRequest["state"],
       canDelete: value.canDelete === true,
+      canEdit: value.canEdit === true,
     }
+  }
+  throw new InvalidResponseError(GATEWAY_FUNCTION)
+}
+
+function toPublicHoliday(value: unknown): PublicHoliday {
+  if (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    typeof value.from === "string" &&
+    typeof value.to === "string"
+  ) {
+    return { name: value.name, from: value.from, to: value.to }
   }
   throw new InvalidResponseError(GATEWAY_FUNCTION)
 }
@@ -1169,6 +1184,11 @@ export function fetchTimeOff(
             available: record.available === true,
             leaveTypes: readList(record.leaveTypes, toLeaveType),
             requests: readList(record.requests, toLeaveRequest),
+            // Absent from a gateway deployed before holidays were read.
+            holidays:
+              record.holidays === undefined
+                ? []
+                : readList(record.holidays, toPublicHoliday),
             truncated: record.truncated === true,
           }))
       ),
@@ -1195,6 +1215,26 @@ export async function requestTimeOff(
     throw new InvalidResponseError(GATEWAY_FUNCTION)
   } finally {
     // Balances changed too.
+    odooCache.invalidate(TIME_OFF_KEY.id)
+  }
+}
+
+/** Changes a request still waiting for approval; resolves with it as stored. */
+export async function updateTimeOff(
+  leaveId: number,
+  submission: TimeOffSubmission
+): Promise<LeaveRequest> {
+  try {
+    const data = await invokeGateway({
+      action: "UPDATE_TIME_OFF",
+      leaveId,
+      ...submission,
+    })
+    if (isRecord(data)) {
+      return toLeaveRequest(data.request)
+    }
+    throw new InvalidResponseError(GATEWAY_FUNCTION)
+  } finally {
     odooCache.invalidate(TIME_OFF_KEY.id)
   }
 }
