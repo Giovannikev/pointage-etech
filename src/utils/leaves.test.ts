@@ -8,10 +8,8 @@ import {
   groupAttendanceByDay,
   leaveStateTone,
   parseHourOfDay,
-  splitRequests,
   countWorkingDays,
   expectedPeriodHours,
-  filterRequests,
   findAttendanceAnomalies,
   findRemoteWorkType,
   holidayDates,
@@ -125,22 +123,6 @@ describe("formatDuration", () => {
     expect(formatDuration(0.05)).toBe("0:03")
     expect(formatDuration(10)).toBe("10:00")
     expect(formatDuration(-1)).toBe("0:00")
-  })
-})
-
-describe("splitRequests", () => {
-  it("puts running and future requests first, in date order", () => {
-    const { upcoming, past } = splitRequests(
-      [
-        request({ leaveId: 1, dateFrom: "2026-10-20", dateTo: "2026-10-21" }),
-        request({ leaveId: 2, dateFrom: "2026-11-10", dateTo: "2026-11-12" }),
-        request({ leaveId: 3, dateFrom: "2026-10-27", dateTo: "2026-10-29" }),
-        request({ leaveId: 4, dateFrom: "2026-09-01", dateTo: "2026-09-01" }),
-      ],
-      "2026-10-28"
-    )
-    expect(upcoming.map((item) => item.leaveId)).toEqual([3, 2])
-    expect(past.map((item) => item.leaveId)).toEqual([1, 4])
   })
 })
 
@@ -290,22 +272,6 @@ describe("findAttendanceAnomalies", () => {
     expect(anomalies).toEqual([
       { kind: "short", date: "2026-10-26", hours: 8, expected: 8.5 },
     ])
-  })
-})
-
-describe("filterRequests", () => {
-  it("filters by type and state", () => {
-    const requests = [
-      request({ leaveId: 1 }),
-      request({ leaveId: 2, state: "confirm" }),
-      request({ leaveId: 3, leaveTypeName: "Maladie" }),
-    ]
-    expect(
-      filterRequests(requests, "Congés payés", "").map((r) => r.leaveId)
-    ).toEqual([1, 2])
-    expect(
-      filterRequests(requests, "", "pending").map((r) => r.leaveId)
-    ).toEqual([2])
   })
 })
 

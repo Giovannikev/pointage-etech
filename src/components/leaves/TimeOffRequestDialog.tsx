@@ -1,5 +1,10 @@
 import { useId, useMemo, useState, type FormEvent } from "react"
-import { CalendarPlusIcon, Loader2Icon, SaveIcon } from "lucide-react"
+import {
+  CalendarPlusIcon,
+  Loader2Icon,
+  SaveIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { DatePicker } from "@/components/timesheet/DatePicker"
@@ -60,6 +65,8 @@ interface TimeOffRequestDialogProps {
   preset: { type: LeaveType; date: string } | null
   onOpenChange: (open: boolean) => void
   onSaved: (request: LeaveRequest) => void
+  /** Deletes the request being edited, when Odoo still allows it. */
+  onDelete: (request: LeaveRequest) => void
 }
 
 export function typeKeyOf(request: {
@@ -130,6 +137,7 @@ function RequestForm({
   editing,
   preset,
   onSaved,
+  onDelete,
 }: Omit<TimeOffRequestDialogProps, "open" | "onOpenChange">) {
   const { t, i18n } = useTranslation()
   const { formatHours } = useFormatters()
@@ -420,6 +428,18 @@ function RequestForm({
       )}
 
       <DialogFooter>
+        {editing?.canDelete && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-destructive hover:text-destructive sm:mr-auto"
+            disabled={isSending}
+            onClick={() => onDelete(editing)}
+          >
+            <Trash2Icon />
+            {t("leaves.delete")}
+          </Button>
+        )}
         <DialogClose asChild>
           <Button type="button" variant="outline" disabled={isSending}>
             {t("common.cancel")}

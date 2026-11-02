@@ -452,9 +452,6 @@
     "daysLeft_one": "day left",
     "daysLeft_other": "days left",
     "hoursLeft": "left",
-    "upcoming": "Upcoming and ongoing",
-    "past": "Past",
-    "noRequests": "No time off request in the last year.",
     "state": {
       "confirm": "To approve",
       "refuse": "Refused",
@@ -526,7 +523,6 @@
     },
     "expected": "Expected for the period: {{hours}}",
     "balance": "Difference: {{hours}}",
-    "edit": "Edit the request",
     "editTitle": "Edit the request",
     "editHint": "Possible while it waits for approval and hasn't started.",
     "saveChanges": "Save",
@@ -543,7 +539,6 @@
       "refused": "Refused",
       "canceled": "Cancelled"
     },
-    "noMatch": "No request matches the filters.",
     "calendar": {
       "previous": "Previous month",
       "next": "Next month",
@@ -552,14 +547,10 @@
       "legendLeave": "Time off",
       "legendRemote": "Worked time",
       "legendHoliday": "Public holiday",
-      "legendPending": "Pending"
+      "legendPending": "Pending",
+      "openRequest": "Click to edit or delete"
     },
-    "carousel": {
-      "previous": "Previous requests",
-      "next": "Next requests"
-    },
-    "balanceTaken": "{{taken}} taken of {{total}}",
-    "ongoingBadge": "Ongoing"
+    "balanceTaken": "{{taken}} taken of {{total}}"
   },
   "editTimesheet": {
     "title": "Edit timesheet",

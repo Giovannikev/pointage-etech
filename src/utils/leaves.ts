@@ -76,20 +76,6 @@ export function parseHourOfDay(value: string): number | null {
   return hours + minutes / 60
 }
 
-/** Requests still to come or running come first, then the past ones. */
-export function splitRequests(
-  requests: LeaveRequest[],
-  today: string
-): { upcoming: LeaveRequest[]; past: LeaveRequest[] } {
-  const upcoming = requests
-    .filter((request) => request.dateTo >= today)
-    .sort((a, b) => a.dateFrom.localeCompare(b.dateFrom))
-  const past = requests
-    .filter((request) => request.dateTo < today)
-    .sort((a, b) => b.dateFrom.localeCompare(a.dateFrom))
-  return { upcoming, past }
-}
-
 /** Badge tone of a request state. */
 export function leaveStateTone(
   state: LeaveState
@@ -304,19 +290,6 @@ export function monthWeeks(month: string): string[][] {
     weeks.push(week)
   } while (date.slice(0, 7) === month)
   return weeks
-}
-
-/** Requests whose type and state match the filters ("" for any). */
-export function filterRequests(
-  requests: LeaveRequest[],
-  typeName: string,
-  tone: "" | ReturnType<typeof leaveStateTone>
-): LeaveRequest[] {
-  return requests.filter(
-    (request) =>
-      (typeName === "" || request.leaveTypeName === typeName) &&
-      (tone === "" || leaveStateTone(request.state) === tone)
-  )
 }
 
 /**

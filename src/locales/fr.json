@@ -452,9 +452,6 @@
     "daysLeft_one": "jour restant",
     "daysLeft_other": "jours restants",
     "hoursLeft": "restantes",
-    "upcoming": "À venir et en cours",
-    "past": "Passées",
-    "noRequests": "Aucune demande de congé sur la dernière année.",
     "state": {
       "confirm": "À approuver",
       "refuse": "Refusée",
@@ -526,7 +523,6 @@
     },
     "expected": "Attendu sur la période : {{hours}}",
     "balance": "Écart : {{hours}}",
-    "edit": "Modifier la demande",
     "editTitle": "Modifier la demande",
     "editHint": "Possible tant qu'elle attend l'approbation et n'a pas commencé.",
     "saveChanges": "Enregistrer",
@@ -543,7 +539,6 @@
       "refused": "Refusées",
       "canceled": "Annulées"
     },
-    "noMatch": "Aucune demande ne correspond aux filtres.",
     "calendar": {
       "previous": "Mois précédent",
       "next": "Mois suivant",
@@ -552,14 +547,10 @@
       "legendLeave": "Congé",
       "legendRemote": "Temps travaillé",
       "legendHoliday": "Jour férié",
-      "legendPending": "En attente"
+      "legendPending": "En attente",
+      "openRequest": "Cliquer pour modifier ou supprimer"
     },
-    "carousel": {
-      "previous": "Demandes précédentes",
-      "next": "Demandes suivantes"
-    },
-    "balanceTaken": "{{taken}} pris sur {{total}}",
-    "ongoingBadge": "En cours"
+    "balanceTaken": "{{taken}} pris sur {{total}}"
   },
   "editTimesheet": {
     "title": "Modifier le pointage",

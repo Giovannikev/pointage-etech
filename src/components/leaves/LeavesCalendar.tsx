@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { ChevronLeftIcon, ChevronRightIcon, HourglassIcon } from "lucide-react"
 import type { TFunction } from "i18next"
 import { useTranslation } from "react-i18next"
@@ -85,7 +85,18 @@ function requestLabel(request: LeaveRequest, t: TFunction): string {
  * A month of time off, public holidays and attendance hours: a grid with
  * labels from sm; on a phone, a grid of dots and the month's days in a list.
  */
-export function LeavesCalendar() {
+export function LeavesCalendar({
+  filter,
+  toolbar,
+  onOpenRequest,
+}: {
+  /** Which requests to show: the filters of the time off section. */
+  filter: (request: LeaveRequest) => boolean
+  /** The filters, shown beside the month. */
+  toolbar?: ReactNode
+  /** Opens a request still waiting for approval, to change or delete it. */
+  onOpenRequest: (request: LeaveRequest) => void
+}) {
   const { t } = useTranslation()
   const { formatMonth, formatShortDate, language } = useFormatters()
   const now = useNow()
@@ -120,13 +131,13 @@ export function LeavesCalendar() {
     return {
       requests: results
         .flatMap((result) => result.requests)
-        .filter(isActiveRequest),
+        .filter((request) => isActiveRequest(request) && filter(request)),
       workedTypes: workedTimeTypeKeys(
         results.flatMap((result) => result.leaveTypes)
       ),
       holidays: holidayDates(results.flatMap((result) => result.holidays)),
     }
-  }, [timeOff.data])
+  }, [timeOff.data, filter])
   const hoursByDate = useMemo(() => {
     const attendances = (attendance.data ?? [])
       .filter(
@@ -163,6 +174,41 @@ export function LeavesCalendar() {
       isWorked(request) ? WORKED_STYLE : ABSENCE_STYLE,
       isPending(request) && PENDING_STYLE
     )
+  /**
+   * A request on a day; one Odoo still lets the user change opens it (a
+   * button), the others only describe it.
+   */
+  const requestChip = (
+    request: LeaveRequest,
+    className: string,
+    children: ReactNode
+  ) => {
+    const title = [
+      `${request.leaveTypeName} · ${t(`leaves.state.${request.state}`)}`,
+      request.description,
+    ]
+      .filter((line) => line !== "")
+      .join("\n")
+    return request.canEdit ? (
+      <button
+        key={leaveKey(request)}
+        type="button"
+        title={`${title}\n${t("leaves.calendar.openRequest")}`}
+        className={cn(
+          className,
+          "cursor-pointer text-left outline-none hover:ring-1 hover:ring-current focus-visible:ring-2 focus-visible:ring-ring"
+        )}
+        onClick={() => onOpenRequest(request)}
+      >
+        {children}
+      </button>
+    ) : (
+      <span key={leaveKey(request)} title={title} className={className}>
+        {children}
+      </span>
+    )
+  }
+
   // The phone list: the month's days with something on them.
   const agenda = weeks
     .flat()
@@ -177,11 +223,12 @@ export function LeavesCalendar() {
 
   return (
     <section className="grid min-w-0 content-start gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-semibold first-letter:uppercase">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="mr-2 text-base font-semibold first-letter:uppercase">
           {formatMonth(month)}
         </h3>
-        <div className="flex items-center gap-1">
+        {toolbar && <div className="flex flex-wrap gap-2">{toolbar}</div>}
+        <div className="ml-auto flex items-center gap-1">
           {month !== today.slice(0, 7) && (
             <Button
               variant="outline"
@@ -272,33 +319,28 @@ export function LeavesCalendar() {
                         {day.holiday || t("leaves.calendar.holiday")}
                       </span>
                     )}
-                    {day.requests.map((request) => (
-                      <span
-                        key={leaveKey(request)}
-                        className={cn(CHIP, requestStyle(request))}
-                        title={[
-                          `${request.leaveTypeName} · ${t(`leaves.state.${request.state}`)}`,
-                          request.description,
-                        ]
-                          .filter((line) => line !== "")
-                          .join("\n")}
-                      >
-                        <span className="flex items-center gap-0.5 truncate">
-                          {isPending(request) && (
-                            <HourglassIcon className="size-2.5 shrink-0" />
+                    {day.requests.map((request) =>
+                      requestChip(
+                        request,
+                        cn(CHIP, requestStyle(request)),
+                        <>
+                          <span className="flex items-center gap-0.5 truncate">
+                            {isPending(request) && (
+                              <HourglassIcon className="size-2.5 shrink-0" />
+                            )}
+                            <span className="truncate">
+                              {requestLabel(request, t)}
+                            </span>
+                          </span>
+                          {/* The reason given in the request, under its type. */}
+                          {request.description !== "" && (
+                            <span className="block truncate font-normal opacity-80">
+                              {request.description}
+                            </span>
                           )}
-                          <span className="truncate">
-                            {requestLabel(request, t)}
-                          </span>
-                        </span>
-                        {/* The reason given in the request, under its type. */}
-                        {request.description !== "" && (
-                          <span className="block truncate font-normal opacity-80">
-                            {request.description}
-                          </span>
-                        )}
-                      </span>
-                    ))}
+                        </>
+                      )
+                    )}
                     {day.hours !== undefined && (
                       <span className="mt-auto text-right text-[11px] font-semibold tabular-nums max-sm:hidden">
                         {formatDuration(day.hours)}
@@ -335,29 +377,30 @@ export function LeavesCalendar() {
                     {day.holiday || t("leaves.calendar.holiday")}
                   </span>
                 )}
-                {day.requests.map((request) => (
-                  <span
-                    key={leaveKey(request)}
-                    className={cn(
+                {day.requests.map((request) =>
+                  requestChip(
+                    request,
+                    cn(
                       "grid w-fit max-w-full rounded px-1.5 py-0.5 text-xs font-medium",
                       requestStyle(request)
-                    )}
-                  >
-                    <span className="flex items-center gap-1">
-                      {isPending(request) && (
-                        <HourglassIcon className="size-3 shrink-0" />
+                    ),
+                    <>
+                      <span className="flex items-center gap-1">
+                        {isPending(request) && (
+                          <HourglassIcon className="size-3 shrink-0" />
+                        )}
+                        <span className="truncate">
+                          {requestLabel(request, t)}
+                        </span>
+                      </span>
+                      {request.description !== "" && (
+                        <span className="truncate font-normal opacity-80">
+                          {request.description}
+                        </span>
                       )}
-                      <span className="truncate">
-                        {requestLabel(request, t)}
-                      </span>
-                    </span>
-                    {request.description !== "" && (
-                      <span className="truncate font-normal opacity-80">
-                        {request.description}
-                      </span>
-                    )}
-                  </span>
-                ))}
+                    </>
+                  )
+                )}
               </div>
               {day.hours !== undefined && (
                 <span className="shrink-0 text-sm font-semibold tabular-nums">

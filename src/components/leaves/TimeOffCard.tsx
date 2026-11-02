@@ -1,18 +1,8 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react"
+import { useCallback, useMemo, useState } from "react"
 import {
   CalendarPlusIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   HouseIcon,
   Loader2Icon,
-  PencilIcon,
   RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react"
@@ -32,7 +22,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -59,20 +48,17 @@ import type {
 } from "@/types/timesheet"
 import { todayIsoDate } from "@/utils/date"
 import {
-  filterRequests,
   findRemoteWorkType,
-  formatHourOfDay,
   holidayDates,
-  leaveKey,
   leaveStateTone,
   nextWorkingDay,
-  splitRequests,
 } from "@/utils/leaves"
 
 type AvailableTimeOff = Extract<TimeOffInstanceResult, { ok: true }>
 
 type Tone = ReturnType<typeof leaveStateTone>
-const TONES: readonly Tone[] = ["pending", "approved", "refused", "canceled"]
+/** The calendar shows no refused or cancelled request: only these filter it. */
+const TONES: readonly Tone[] = ["pending", "approved"]
 
 /** What the request dialog opens on: a new request, a preset one, or an edit. */
 interface DialogState {
@@ -82,13 +68,6 @@ interface DialogState {
 
 const SELECT_CLASS =
   "h-8 min-w-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
-
-const TONE_STYLES = {
-  pending: "bg-warning/12 text-warning",
-  approved: "bg-success/12 text-success",
-  refused: "bg-destructive/10 text-destructive",
-  canceled: "bg-muted text-muted-foreground line-through",
-} as const
 
 /**
  * A balance at a glance: what is left, large, and a bar of what was taken
@@ -159,201 +138,6 @@ function BalanceTile({
     </div>
   )
 }
-
-function RequestRow({
-  request,
-  showInstance,
-  className,
-  onEdit,
-  onDelete,
-}: {
-  request: LeaveRequest
-  showInstance: boolean
-  className?: string
-  onEdit: (request: LeaveRequest) => void
-  onDelete: (request: LeaveRequest) => void
-}) {
-  const { t } = useTranslation()
-  const { formatMediumDate, formatShortDate } = useFormatters()
-  const tone = leaveStateTone(request.state)
-  const today = todayIsoDate()
-  // Started and not over: the time off is happening now.
-  const isOngoing =
-    (tone === "approved" || tone === "pending") &&
-    request.dateFrom <= today &&
-    today <= request.dateTo
-
-  let when =
-    request.dateFrom === request.dateTo
-      ? formatMediumDate(request.dateFrom)
-      : `${formatShortDate(request.dateFrom)} – ${formatMediumDate(request.dateTo)}`
-  if (request.period !== null) {
-    when += ` · ${request.period === "am" ? t("leaves.morning") : t("leaves.afternoon")}`
-  }
-  if (request.hourFrom !== null && request.hourTo !== null) {
-    when += ` · ${formatHourOfDay(request.hourFrom)}–${formatHourOfDay(request.hourTo)}`
-  }
-
-  return (
-    <li className={cn("flex items-start gap-3 px-3 py-2.5", className)}>
-      <div className="grid min-w-0 flex-1 gap-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-medium">
-            {request.leaveTypeName}
-          </span>
-          {isOngoing && (
-            <Badge className="bg-primary font-semibold text-primary-foreground">
-              {t("leaves.ongoingBadge")}
-            </Badge>
-          )}
-          <Badge className={cn("font-semibold", TONE_STYLES[tone])}>
-            {t(`leaves.state.${request.state}`)}
-          </Badge>
-          {showInstance && (
-            <InstanceBadge instanceIndex={request.instanceIndex} />
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {when}
-          {request.duration !== null && ` · ${request.duration}`}
-        </p>
-        {request.description !== "" && (
-          <p className="line-clamp-2 text-xs text-muted-foreground">
-            {request.description}
-          </p>
-        )}
-      </div>
-      {request.canEdit && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0 text-muted-foreground"
-          aria-label={t("leaves.edit")}
-          title={t("leaves.edit")}
-          onClick={() => onEdit(request)}
-        >
-          <PencilIcon />
-        </Button>
-      )}
-      {request.canDelete && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0 text-muted-foreground"
-          aria-label={t("leaves.delete")}
-          title={t("leaves.delete")}
-          onClick={() => onDelete(request)}
-        >
-          <Trash2Icon />
-        </Button>
-      )}
-    </li>
-  )
-}
-
-/**
- * Requests side by side, one card per request, scrolled with the arrows or
- * a swipe: a year of past requests without a long list.
- */
-function RequestCarousel({
-  title,
-  requests,
-  renderItem,
-}: {
-  title: string
-  requests: LeaveRequest[]
-  renderItem: (request: LeaveRequest, className: string) => ReactNode
-}) {
-  const { t } = useTranslation()
-  const track = useRef<HTMLUListElement>(null)
-  const [position, setPosition] = useState({
-    first: 0,
-    atStart: true,
-    atEnd: false,
-  })
-
-  const readPosition = useCallback(() => {
-    const element = track.current
-    if (element === null) return
-    const card = element.firstElementChild?.getBoundingClientRect().width ?? 1
-    setPosition({
-      first: Math.round(element.scrollLeft / (card + CAROUSEL_GAP)),
-      atStart: element.scrollLeft <= 1,
-      atEnd:
-        element.scrollLeft + element.clientWidth >= element.scrollWidth - 1,
-    })
-  }, [])
-  // On first layout and on resize: whether the cards overflow at all.
-  useEffect(() => {
-    const element = track.current
-    if (element === null) return
-    const observer = new ResizeObserver(readPosition)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [readPosition, requests.length])
-  const scrollBy = (direction: 1 | -1) => {
-    const element = track.current
-    if (element === null) return
-    const card = element.firstElementChild?.getBoundingClientRect().width ?? 0
-    element.scrollBy({
-      left: direction * (card + CAROUSEL_GAP),
-      behavior: "smooth",
-    })
-  }
-
-  return (
-    <section className="grid min-w-0 gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-muted-foreground">
-          {title} ({requests.length})
-        </h3>
-        {requests.length > 1 && (
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {position.atEnd
-                ? requests.length
-                : Math.min(position.first + 1, requests.length)}{" "}
-              / {requests.length}
-            </span>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("leaves.carousel.previous")}
-              disabled={position.atStart}
-              onClick={() => scrollBy(-1)}
-            >
-              <ChevronLeftIcon />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t("leaves.carousel.next")}
-              disabled={position.atEnd}
-              onClick={() => scrollBy(1)}
-            >
-              <ChevronRightIcon />
-            </Button>
-          </div>
-        )}
-      </div>
-      <ul
-        ref={track}
-        onScroll={readPosition}
-        className="flex snap-x snap-mandatory [scrollbar-width:none] gap-3 overflow-x-auto overscroll-x-contain pb-1 [&::-webkit-scrollbar]:hidden"
-      >
-        {requests.map((request) =>
-          renderItem(
-            request,
-            "w-[85%] shrink-0 snap-start rounded-lg border sm:w-64"
-          )
-        )}
-      </ul>
-    </section>
-  )
-}
-
-/** Space between carousel cards, in px: Tailwind's gap-3. */
-const CAROUSEL_GAP = 12
 
 function DeleteRequestDialog({
   request,
@@ -435,7 +219,7 @@ function DeleteRequestDialog({
   )
 }
 
-/** Time off: balances, new requests, the month's calendar and the requests. */
+/** Time off: balances, new requests, and the requests on the month's calendar. */
 export function TimeOffCard() {
   const { t } = useTranslation()
   const fetcher = useCallback(
@@ -479,41 +263,18 @@ export function TimeOffCard() {
       [...new Set(allRequests.map((request) => request.leaveTypeName))].sort(),
     [allRequests]
   )
-  const { upcoming, past } = useMemo(
-    () =>
-      splitRequests(
-        filterRequests(allRequests, typeFilter, toneFilter),
-        todayIsoDate()
-      ),
-    [allRequests, typeFilter, toneFilter]
-  )
   const holidays = useMemo(
     () => holidayDates(available.flatMap((result) => result.holidays)),
     [available]
   )
   const remoteType = findRemoteWorkType(leaveTypes)
   const remoteDay = nextWorkingDay(todayIsoDate(), holidays)
-  const isFiltered = typeFilter !== "" || toneFilter !== ""
-
-  const renderRow = (request: LeaveRequest, className?: string) => (
-    <RequestRow
-      key={leaveKey(request)}
-      request={request}
-      showInstance={showInstance}
-      className={className}
-      onEdit={(editing) => requestDialog.open({ editing, preset: null })}
-      onDelete={deleteDialog.open}
-    />
+  const matchesFilters = useCallback(
+    (request: LeaveRequest) =>
+      (typeFilter === "" || request.leaveTypeName === typeFilter) &&
+      (toneFilter === "" || leaveStateTone(request.state) === toneFilter),
+    [typeFilter, toneFilter]
   )
-  const renderList = (title: string, requests: LeaveRequest[]) =>
-    requests.length > 0 && (
-      <section className="grid gap-2">
-        <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
-        <ul className="grid divide-y rounded-lg border">
-          {requests.map((request) => renderRow(request))}
-        </ul>
-      </section>
-    )
 
   return (
     <Card>
@@ -596,12 +357,14 @@ export function TimeOffCard() {
                 ))}
               </div>
             )}
-            {/* The month on the left, the requests beside it. */}
-            <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-              <LeavesCalendar />
-              <div className="grid min-w-0 content-start gap-4">
-                {allRequests.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
+            <LeavesCalendar
+              filter={matchesFilters}
+              onOpenRequest={(editing) =>
+                requestDialog.open({ editing, preset: null })
+              }
+              toolbar={
+                allRequests.length > 0 && (
+                  <>
                     <select
                       aria-label={t("leaves.filterType")}
                       className={SELECT_CLASS}
@@ -633,23 +396,10 @@ export function TimeOffCard() {
                         </option>
                       ))}
                     </select>
-                  </div>
-                )}
-                {renderList(t("leaves.upcoming"), upcoming)}
-                {past.length > 0 && (
-                  <RequestCarousel
-                    title={t("leaves.past")}
-                    requests={past}
-                    renderItem={renderRow}
-                  />
-                )}
-                {upcoming.length === 0 && past.length === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    {isFiltered ? t("leaves.noMatch") : t("leaves.noRequests")}
-                  </p>
-                )}
-              </div>
-            </div>
+                  </>
+                )
+              }
+            />
           </>
         )}
       </CardContent>
@@ -663,6 +413,10 @@ export function TimeOffCard() {
         editing={requestDialog.target?.editing ?? null}
         preset={requestDialog.target?.preset ?? null}
         onOpenChange={(open) => !open && requestDialog.close()}
+        onDelete={(request) => {
+          requestDialog.close()
+          deleteDialog.open(request)
+        }}
         onSaved={(request) => {
           const wasEditing = requestDialog.target?.editing != null
           requestDialog.close()
