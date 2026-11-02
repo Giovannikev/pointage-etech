@@ -75,6 +75,23 @@ export function leaveOffIntervals(
   )
 }
 
+/**
+ * True when worked time away from the office (remote work) covers the end
+ * of the afternoon on `date`: a whole day, an afternoon, or hours until then.
+ */
+export function remoteAtDayEnd(
+  spans: readonly LeaveSpan[],
+  date: string,
+  schedule: WorkSchedule
+): boolean {
+  const end = schedule.afternoon[1]
+  return spans.some((span) =>
+    leaveOffIntervals(span, date, schedule).some(
+      ([from, to]) => from < end && to >= end
+    )
+  )
+}
+
 function subtract(work: Interval, off: readonly Interval[]): Interval[] {
   let pieces: Interval[] = [work]
   for (const [offStart, offEnd] of off) {
@@ -101,6 +118,36 @@ export function planPunches(
       { minute: start, action: "in" },
       { minute: end, action: "out" },
     ])
+}
+
+/** FNV-1a: a stable 32-bit hash, so every run draws the same "random" minute. */
+function hash(text: string): number {
+  let value = 0x811c9dc5
+  for (let i = 0; i < text.length; i += 1) {
+    value ^= text.charCodeAt(i)
+    value = Math.imul(value, 0x01000193)
+  }
+  return value >>> 0
+}
+
+/**
+ * Delays each punch by a whole number of minutes from 0 to `window` (09:00
+ * becomes 09:00-09:10 for 10), drawn from `seed` (the user and the date)
+ * and the punch: the same on every run of the day, different each day. A
+ * punch stays before the next planned one.
+ */
+export function randomizePunches(
+  punches: readonly Punch[],
+  window: number,
+  seed: string
+): Punch[] {
+  return punches.map((punch, index) => {
+    const next = punches[index + 1]?.minute ?? 24 * 60
+    const room = Math.min(window, Math.ceil(next - punch.minute) - 1)
+    if (room <= 0) return punch
+    const delay = hash(`${seed}|${punch.action}|${punch.minute}`) % (room + 1)
+    return { ...punch, minute: punch.minute + delay }
+  })
 }
 
 const WEEKDAYS: Readonly<Record<string, number>> = {

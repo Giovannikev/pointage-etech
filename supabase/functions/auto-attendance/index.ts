@@ -1,7 +1,7 @@
 /**
  * auto-attendance — Supabase Edge Function (Deno)
  *
- * Called by pg_cron every 15 minutes (supabase/cron/auto-attendance.sql),
+ * Called by pg_cron every minute (supabase/cron/auto-attendance.sql),
  * never by browsers: deploy it with JWT verification off and protect it with
  * the CRON_SECRET header.
  *
@@ -11,7 +11,16 @@
  * half on a half day, and out/in around hours off. Public holidays count as
  * days off. Requests waiting for approval count too, so a refused request
  * leaves the day to check in by hand. Time off of a "worked time" type
- * (remote work, training: time_type "other") doesn't: the user works.
+ * (remote work, training: time_type "other") doesn't: the user works. With
+ * remote_afternoon_end, such a request covering the end of the afternoon
+ * moves the check-out there (18:00 at home, 17:30 at the office).
+ *
+ * With random_window_minutes, each punch falls at a random minute after its
+ * planned time: 09:00-09:10 for 10. The minute is drawn from the user and
+ * the date, so every run of the day agrees on it.
+ *
+ * Odoo is read at each quarter hour (time off may have changed) and at the
+ * next punch found then (next_punch_at); the other runs do nothing.
  *
  * It acts only at a planned time, and only when the user's state differs:
  * a check-out by hand stays until the next planned time. A punch that fails
@@ -19,6 +28,9 @@
  *
  * POST {}                                   the cron run
  * POST { "dryRun": true, "at"?: ISO time }  shows the day's plan, punches nothing
+ *
+ * Without the cron secret, a signed-in user (Authorization: Bearer) gets
+ * their own day's plan, for the app: POST { "action": "PLAN" }.
  *
  * Secrets: CRON_SECRET (plus SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
  * CREDENTIALS_ENCRYPTION_KEY).
@@ -31,6 +43,7 @@ import {
 import {
   type Interval,
   leaveOffIntervals,
+  type Minute,
   type LeaveSpan,
   localMidnight,
   localMoment,
@@ -38,12 +51,15 @@ import {
   type Period,
   planPunches,
   type Punch,
+  randomizePunches,
+  remoteAtDayEnd,
   toLocalInterval,
   type WorkSchedule,
 } from "../_shared/attendancePlan.ts"
-import { getAdminClient } from "../_shared/auth.ts"
+import { getAdminClient, requireUserId } from "../_shared/auth.ts"
 import { requireEnv } from "../_shared/env.ts"
 import { HttpError } from "../_shared/errors.ts"
+import { corsHeaders } from "../_shared/http.ts"
 import {
   createSessionPool,
   executeKw,
@@ -75,16 +91,18 @@ interface Preference {
   userId: string
   timezone: string
   schedule: WorkSchedule
+  /** The check-out on a remote work afternoon; null to keep the schedule's. */
+  remoteAfternoonEnd: Minute | null
+  /** Each punch falls at a random minute up to this many after its time. */
+  randomWindow: number
   /** The last planned punch handled, so it isn't made twice. */
   lastPunchAt: Date | null
+  /** The next punch, as of the last Odoo read: when to read Odoo again. */
+  nextPunchAt: Date | null
 }
 
 type Outcome =
-  | "idle"
-  | "checked_in"
-  | "checked_out"
-  | "already_right"
-  | "failed"
+  "idle" | "checked_in" | "checked_out" | "already_right" | "failed"
 
 /** A request found on the day, and whether it takes time off. */
 interface FoundLeave {
@@ -94,6 +112,7 @@ interface FoundLeave {
 
 interface DayPlan {
   date: string
+  remote: boolean
   punches: Punch[]
   leaves: FoundLeave[]
   holidays: number
@@ -124,6 +143,10 @@ function readInterval(start: unknown, end: unknown): Interval | null {
   return from !== null && to !== null && from < to ? [from, to] : null
 }
 
+function readTimestamp(value: unknown): Date | null {
+  return typeof value === "string" ? new Date(value) : null
+}
+
 function readPreference(row: unknown): Preference | null {
   if (
     !isRecord(row) ||
@@ -137,14 +160,22 @@ function readPreference(row: unknown): Preference | null {
   if (morning === null || afternoon === null || morning[1] > afternoon[0]) {
     return null
   }
+  const remoteEnd =
+    typeof row.remote_afternoon_end === "string"
+      ? parseClock(row.remote_afternoon_end)
+      : null
   return {
     userId: row.user_id,
     timezone: row.timezone,
     schedule: { morning, afternoon },
-    lastPunchAt:
-      typeof row.last_punch_at === "string"
-        ? new Date(row.last_punch_at)
-        : null,
+    remoteAfternoonEnd:
+      remoteEnd !== null && remoteEnd > afternoon[0] ? remoteEnd : null,
+    randomWindow:
+      typeof row.random_window_minutes === "number"
+        ? Math.max(0, Math.floor(row.random_window_minutes))
+        : 0,
+    lastPunchAt: readTimestamp(row.last_punch_at),
+    nextPunchAt: readTimestamp(row.next_punch_at),
   }
 }
 
@@ -241,19 +272,28 @@ async function readWorkedTimeTypes(
   })
   return new Set(
     (Array.isArray(types) ? types : []).flatMap((type) =>
-      isRecord(type) && typeof type.id === "number" && type.time_type === "other"
+      isRecord(type) &&
+      typeof type.id === "number" &&
+      type.time_type === "other"
         ? [type.id]
         : []
     )
   )
 }
 
-/** The user's pending or approved requests covering `date`; only absences take time off. */
+/**
+ * The user's pending or approved requests covering `date`: absences take
+ * time off, worked time (remote work) can move the check-out.
+ */
 async function readLeaves(
   session: OdooSession,
   employeeId: number,
   date: string
-): Promise<{ spans: LeaveSpan[]; found: FoundLeave[] }> {
+): Promise<{
+  spans: LeaveSpan[]
+  workedSpans: LeaveSpan[]
+  found: FoundLeave[]
+}> {
   const description = await executeKw(session, "hr.leave", "fields_get", [], {
     attributes: ["type"],
   })
@@ -284,15 +324,16 @@ async function readLeaves(
     ...new Set(types.flatMap((type) => (type === null ? [] : [type.id]))),
   ])
   const spans: LeaveSpan[] = []
+  const workedSpans: LeaveSpan[] = []
   const found: FoundLeave[] = []
   records.forEach((record, index) => {
     const type = types[index]
     const counted = type === null || !workedTime.has(type.id)
     found.push({ type: type?.name ?? "?", counted })
-    const span = counted ? readLeaveSpan(record) : null
-    if (span !== null) spans.push(span)
+    const span = readLeaveSpan(record)
+    if (span !== null) (counted ? spans : workedSpans).push(span)
   })
-  return { spans, found }
+  return { spans, workedSpans, found }
 }
 
 /**
@@ -340,7 +381,11 @@ async function readHolidays(
   return records.flatMap((record): Interval[] => {
     if (!isRecord(record)) return []
     const calendar = readMany2one(record.calendar_id)
-    if (calendar !== null && calendarId !== null && calendar.id !== calendarId) {
+    if (
+      calendar !== null &&
+      calendarId !== null &&
+      calendar.id !== calendarId
+    ) {
       return []
     }
     const from = readOdooDatetime(record.date_from)
@@ -368,9 +413,22 @@ async function planDay(
     ),
     ...holidays,
   ]
+  const remote =
+    preference.remoteAfternoonEnd !== null &&
+    remoteAtDayEnd(leaves.workedSpans, date, preference.schedule)
+  const { morning, afternoon } = preference.schedule
+  const schedule: WorkSchedule =
+    remote && preference.remoteAfternoonEnd !== null
+      ? { morning, afternoon: [afternoon[0], preference.remoteAfternoonEnd] }
+      : preference.schedule
   return {
     date,
-    punches: planPunches(preference.schedule, off),
+    remote,
+    punches: randomizePunches(
+      planPunches(schedule, off),
+      preference.randomWindow,
+      `${preference.userId}|${date}`
+    ),
     leaves: leaves.found,
     holidays: holidays.length,
   }
@@ -386,14 +444,41 @@ function outsideWorkingHours(preference: Preference, now: Date): boolean {
   if (local === null || local.weekday > 5) return true
   const { morning, afternoon } = preference.schedule
   // Time off only removes work: every punch falls within the schedule.
+  const dayEnd = Math.max(afternoon[1], preference.remoteAfternoonEnd ?? 0)
   return (
     local.minute < morning[0] ||
-    local.minute > afternoon[1] + CATCH_UP_MINUTES
+    local.minute > dayEnd + preference.randomWindow + CATCH_UP_MINUTES
   )
 }
 
+/**
+ * True when Odoo can wait: off the quarter hours (where time off starts and
+ * ends), before the next punch found at the last read.
+ */
+function nothingDue(preference: Preference, now: Date): boolean {
+  const local = localMoment(now, preference.timezone)
+  if (local === null || local.minute % 15 === 0) return false
+  const next = preference.nextPunchAt
+  return next === null || next.getTime() > now.getTime()
+}
+
+async function savePunchTimes(
+  userId: string,
+  times: { last_punch_at?: string; next_punch_at: string | null }
+): Promise<void> {
+  const { error } = await getAdminClient()
+    .from(TABLE)
+    .update(times)
+    .eq("user_id", userId)
+  if (error !== null) {
+    throw new HttpError(`Couldn't record the punch: ${error.message}`, 500)
+  }
+}
+
 async function punch(preference: Preference, now: Date): Promise<Outcome> {
-  if (outsideWorkingHours(preference, now)) return "idle"
+  if (outsideWorkingHours(preference, now) || nothingDue(preference, now)) {
+    return "idle"
+  }
   const local = localMoment(now, preference.timezone)
   if (local === null) return "idle"
 
@@ -406,15 +491,22 @@ async function punch(preference: Preference, now: Date): Promise<Outcome> {
     preference.lastPunchAt?.getTime() ?? 0,
     now.getTime() - CATCH_UP_MINUTES * 60_000
   )
-  const due = plan.punches
-    .map((planned) => ({
-      ...planned,
-      at: new Date(dayStart.getTime() + planned.minute * 60_000),
-    }))
-    .filter(({ at }) => at.getTime() > after && at.getTime() <= now.getTime())
+  const timed = plan.punches.map((planned) => ({
+    ...planned,
+    at: new Date(dayStart.getTime() + planned.minute * 60_000),
+  }))
+  const due = timed.filter(
+    ({ at }) => at.getTime() > after && at.getTime() <= now.getTime()
+  )
+  const next =
+    timed.find(({ at }) => at.getTime() > now.getTime())?.at.toISOString() ??
+    null
   // Several due (a missed run): the latest one sets the state.
   const latest = due.at(-1)
-  if (latest === undefined) return "idle"
+  if (latest === undefined) {
+    await savePunchTimes(preference.userId, { next_punch_at: next })
+    return "idle"
+  }
 
   const isIn = (await readOpenAttendanceId(session, employeeId)) !== null
   let outcome: Outcome = "already_right"
@@ -423,47 +515,56 @@ async function punch(preference: Preference, now: Date): Promise<Outcome> {
     outcome = latest.action === "in" ? "checked_in" : "checked_out"
   }
 
-  const { error } = await getAdminClient()
-    .from(TABLE)
-    .update({ last_punch_at: latest.at.toISOString() })
-    .eq("user_id", preference.userId)
-  if (error !== null) {
-    throw new HttpError(`Couldn't record the punch: ${error.message}`, 500)
-  }
+  await savePunchTimes(preference.userId, {
+    last_punch_at: latest.at.toISOString(),
+    next_punch_at: next,
+  })
   console.log(
-    `auto-attendance: user ${preference.userId}: ${outcome} for ${clock(latest.minute)} (${plan.leaves.filter((leave) => leave.counted).length} time off, ${plan.holidays} holidays)`
+    `auto-attendance: user ${preference.userId}: ${outcome} for ${clock(latest.minute)} (${plan.remote ? "remote, " : ""}${plan.leaves.filter((leave) => leave.counted).length} time off, ${plan.holidays} holidays)`
   )
   return outcome
+}
+
+/** The user's day as the cron sees it at `now`, without punching. */
+async function describeDay(preference: Preference, now: Date) {
+  const local = localMoment(now, preference.timezone)
+  if (local === null) {
+    throw new HttpError("Unknown time zone.", 400)
+  }
+  const { session, employeeId } = await findAttendanceInstance(
+    preference.userId
+  )
+  const plan = await planDay(session, employeeId, preference, local.date)
+  const isIn = (await readOpenAttendanceId(session, employeeId)) !== null
+  return {
+    instance: session.connection.label,
+    date: plan.date,
+    workingDay: local.weekday <= 5,
+    timeOff: plan.leaves,
+    holidays: plan.holidays,
+    remote: plan.remote,
+    checkedIn: isIn,
+    punches: plan.punches.map(({ minute, action }) => ({
+      time: clock(minute),
+      action,
+    })),
+  }
 }
 
 /** The day's plan of each user, without punching. */
 async function dryRun(preferences: Preference[], now: Date) {
   return await Promise.all(
     preferences.map(async (preference) => {
-      const local = localMoment(now, preference.timezone)
-      if (local === null) {
-        return { userId: preference.userId, error: "Unknown time zone." }
-      }
       try {
-        const { session, employeeId } = await findAttendanceInstance(
-          preference.userId
-        )
-        const plan = await planDay(session, employeeId, preference, local.date)
-        const isIn = (await readOpenAttendanceId(session, employeeId)) !== null
+        const day = await describeDay(preference, now)
         return {
           userId: preference.userId,
-          instance: session.connection.label,
-          date: plan.date,
-          workingDay: local.weekday <= 5,
-          timeOff: plan.leaves.map(
+          ...day,
+          timeOff: day.timeOff.map(
             ({ type, counted }) =>
               `${type}${counted ? "" : " (worked time, ignored)"}`
           ),
-          holidays: plan.holidays,
-          checkedIn: isIn,
-          punches: plan.punches.map(
-            ({ minute, action }) => `${clock(minute)} ${action}`
-          ),
+          punches: day.punches.map(({ time, action }) => `${time} ${action}`),
         }
       } catch (failure) {
         return {
@@ -475,14 +576,70 @@ async function dryRun(preferences: Preference[], now: Date) {
   )
 }
 
-function json(body: unknown, status = 200): Response {
+function json(
+  body: unknown,
+  status = 200,
+  headers: Record<string, string> = {}
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...headers, "Content-Type": "application/json" },
   })
 }
 
+const PREFERENCE_COLUMNS =
+  "user_id, enabled, timezone, morning_start, morning_end, afternoon_start, afternoon_end, remote_afternoon_end, random_window_minutes, last_punch_at, next_punch_at"
+
+/** The signed-in user's own day, for the app: their settings, even when off. */
+async function serveUser(request: Request): Promise<Response> {
+  const headers = corsHeaders(request, "OPTIONS, POST")
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers })
+  }
+  if (request.method !== "POST") {
+    return json({ error: "Method not allowed. Use POST." }, 405, headers)
+  }
+  try {
+    const userId = await requireUserId(request)
+    const { data, error } = await getAdminClient()
+      .from(TABLE)
+      .select(PREFERENCE_COLUMNS)
+      .eq("user_id", userId)
+      .maybeSingle()
+    if (error !== null) {
+      throw new HttpError(
+        `Couldn't read the preferences: ${error.message}`,
+        500
+      )
+    }
+    const preference = data === null ? null : readPreference(data)
+    if (preference === null) {
+      return json({ plan: null }, 200, headers)
+    }
+    return json(
+      {
+        plan: {
+          ...(await describeDay(preference, new Date())),
+          nextPunchAt: preference.nextPunchAt?.toISOString() ?? null,
+        },
+      },
+      200,
+      headers
+    )
+  } catch (failure) {
+    if (failure instanceof HttpError) {
+      return json({ error: failure.message }, failure.status, headers)
+    }
+    console.error("auto-attendance: unexpected error", failure)
+    return json({ error: "Unexpected server error." }, 500, headers)
+  }
+}
+
 Deno.serve(async (request) => {
+  // The app: a signed-in user, no cron secret.
+  if (!request.headers.has("x-cron-secret")) {
+    return await serveUser(request)
+  }
   if (request.method !== "POST") {
     return json({ error: "Method not allowed. Use POST." }, 405)
   }
@@ -496,9 +653,7 @@ Deno.serve(async (request) => {
 
     const { data, error } = await getAdminClient()
       .from(TABLE)
-      .select(
-        "user_id, timezone, morning_start, morning_end, afternoon_start, afternoon_end, last_punch_at"
-      )
+      .select(PREFERENCE_COLUMNS)
       .eq("enabled", true)
     if (error !== null) {
       throw new HttpError(

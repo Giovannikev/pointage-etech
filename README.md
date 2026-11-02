@@ -351,7 +351,29 @@ a "worked time" type (remote work, training) don't. It acts only
 at a planned time and only when the state differs, so a check-out by hand
 holds until the next planned time; a failed punch is retried for 30 minutes.
 
-To set it up: run the `20261030000000_auto_attendance` migration, deploy the
+With `random_window_minutes` set (0 by default), each punch falls at a random
+minute after its planned time: 09:00-09:10, 12:30-12:40... for 10. The minute
+changes every day and is the same on every run of the day. The function runs
+every minute but reads Odoo only at quarter hours and at the next punch
+(`next_punch_at`).
+
+```sql
+update public.auto_attendance_preferences set random_window_minutes = 10;
+```
+
+With `remote_afternoon_end` set (null by default), a remote work afternoon
+ends at that time rather than at `afternoon_end`: a request of a "worked
+time" type covering the end of the afternoon (a whole day, an afternoon, or
+hours until then). The random window applies to it too.
+
+```sql
+update public.auto_attendance_preferences
+  set afternoon_end = '17:30', remote_afternoon_end = '18:00';
+```
+
+To set it up: run the `20261030000000_auto_attendance`,
+`20261102000000_auto_attendance_random_window` and
+`20261102000001_auto_attendance_remote_end` migrations, deploy the
 function with JWT verification off (it reuses the `CRON_SECRET` secret),
 then run `supabase/cron/auto-attendance.sql` in the SQL Editor. To see the
 day's plan without punching:

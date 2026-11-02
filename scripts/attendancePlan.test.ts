@@ -5,6 +5,8 @@ import {
   localMoment,
   parseClock,
   planPunches,
+  randomizePunches,
+  remoteAtDayEnd,
   toLocalInterval,
   type LeaveSpan,
   type WorkSchedule,
@@ -93,6 +95,89 @@ describe("planPunches", () => {
     expect(
       punchesWith([{ unit: "hour", date: DATE, hourFrom: 8, hourTo: 10 }])
     ).toEqual(["in 600", "out 750", "in 810", "out 1080"])
+  })
+})
+
+describe("remoteAtDayEnd", () => {
+  // At the office, out at 17:30.
+  const office: WorkSchedule = { morning: [540, 750], afternoon: [810, 1050] }
+  const remote = (spans: LeaveSpan[]) => remoteAtDayEnd(spans, DATE, office)
+
+  it("sees a remote work day", () => {
+    expect(remote([{ unit: "day", dateFrom: DATE, dateTo: DATE }])).toBe(true)
+    expect(remote([])).toBe(false)
+  })
+
+  it("sees a remote work afternoon, not a morning", () => {
+    const half = (period: "am" | "pm"): LeaveSpan => ({
+      unit: "half_day",
+      dateFrom: DATE,
+      dateTo: DATE,
+      fromPeriod: period,
+      toPeriod: period,
+    })
+    expect(remote([half("pm")])).toBe(true)
+    expect(remote([half("am")])).toBe(false)
+  })
+
+  it("needs remote hours until the end of the day", () => {
+    expect(
+      remote([{ unit: "hour", date: DATE, hourFrom: 14, hourTo: 18 }])
+    ).toBe(true)
+    expect(
+      remote([{ unit: "hour", date: DATE, hourFrom: 9, hourTo: 12 }])
+    ).toBe(false)
+  })
+
+  it("ignores another day", () => {
+    expect(
+      remote([{ unit: "day", dateFrom: "2026-11-03", dateTo: "2026-11-04" }])
+    ).toBe(false)
+  })
+})
+
+describe("randomizePunches", () => {
+  const plain = planPunches(schedule, [])
+
+  it("delays each punch by 0 to 10 minutes", () => {
+    for (const seed of ["a|2026-11-02", "a|2026-11-03", "b|2026-11-02"]) {
+      randomizePunches(plain, 10, seed).forEach((punch, index) => {
+        const delay = punch.minute - plain[index].minute
+        expect(Number.isInteger(delay)).toBe(true)
+        expect(delay).toBeGreaterThanOrEqual(0)
+        expect(delay).toBeLessThanOrEqual(10)
+        expect(punch.action).toBe(plain[index].action)
+      })
+    }
+  })
+
+  it("draws the same minutes on every run of the day", () => {
+    expect(randomizePunches(plain, 10, "a|2026-11-02")).toEqual(
+      randomizePunches(plain, 10, "a|2026-11-02")
+    )
+  })
+
+  it("draws other minutes on other days", () => {
+    const days = Array.from({ length: 20 }, (_, day) =>
+      randomizePunches(plain, 10, `a|2026-11-${day + 1}`)[0].minute
+    )
+    expect(new Set(days).size).toBeGreaterThan(3)
+  })
+
+  it("keeps the exact times without a window", () => {
+    expect(randomizePunches(plain, 0, "a|2026-11-02")).toEqual(plain)
+  })
+
+  it("keeps a punch before the next one", () => {
+    const short = [
+      { minute: 600, action: "in" as const },
+      { minute: 602, action: "out" as const },
+    ]
+    for (let day = 1; day <= 30; day += 1) {
+      const [checkIn, checkOut] = randomizePunches(short, 10, `a|${day}`)
+      expect(checkIn.minute).toBeLessThan(602)
+      expect(checkOut.minute).toBeGreaterThan(checkIn.minute)
+    }
   })
 })
 

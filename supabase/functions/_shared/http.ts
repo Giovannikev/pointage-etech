@@ -45,7 +45,7 @@ export function resolveAllowedOrigin(
     : allowed[0]
 }
 
-function corsHeaders(
+export function corsHeaders(
   request: Request,
   allowedMethods: string
 ): Record<string, string> {
