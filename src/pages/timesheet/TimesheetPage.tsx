@@ -23,6 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useSettings } from "@/contexts/SettingsContext"
 import { useFormatters } from "@/hooks/useFormatters"
 import type { UseTimesheetResult } from "@/hooks/useTimesheet"
 import type {
@@ -131,8 +132,22 @@ export function TimesheetPage({
   const hasEntries = timesheet.entries.length > 0
 
   const openImportModal = (): void => setIsImportModalOpen(true)
+  const { state: settingsState } = useSettings()
+  // GitHub is optional: without a token, commits are pasted.
+  const hasGithub =
+    settingsState.status !== "ready" || settingsState.settings.github !== null
 
   const handleFetchCommits = async (): Promise<void> => {
+    if (!hasGithub) {
+      toast.info(t("timesheet.noGithub"), {
+        description: t("timesheet.noGithubHint"),
+        action: {
+          label: t("notifications.pasteInstead"),
+          onClick: openImportModal,
+        },
+      })
+      return
+    }
     try {
       notifyImport(await timesheet.importFromGithub(), t)
     } catch (error) {

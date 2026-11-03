@@ -57,11 +57,13 @@ export interface OdooInstanceUpdate extends OdooInstanceView {
 }
 
 export interface SettingsUpdate {
+  /** null removes GitHub: commits are then only pasted. */
   github: {
-    /** null keeps the stored token. */
+    /** null keeps the stored token; without one, GitHub stays off. */
     token: string | null
     authorEmails: string[]
-  }
+  } | null
+  /** One instance or both, whichever: a user may work on Edoo IT only. */
   odooInstances: OdooInstanceUpdate[]
 }
 
@@ -165,11 +167,14 @@ function hasUniqueIndexes(instances: { index: InstanceIndex }[]): boolean {
   )
 }
 
-export function parseSettingsUpdate(body: unknown): SettingsUpdate {
-  if (!isRecord(body) || !isRecord(body.github)) {
-    throw new HttpError("Request body must contain the GitHub settings.", 400)
+function parseGithubUpdate(value: unknown): SettingsUpdate["github"] {
+  if (value === null) {
+    return null
   }
-  const { token, authorEmails } = body.github
+  if (!isRecord(value)) {
+    throw new HttpError("The GitHub settings are invalid.", 400)
+  }
+  const { token, authorEmails } = value
   if (!isOptionalSecret(token)) {
     throw new HttpError("The GitHub token is invalid.", 400)
   }
@@ -179,6 +184,17 @@ export function parseSettingsUpdate(body: unknown): SettingsUpdate {
       400
     )
   }
+  return {
+    token: token === null ? null : token.trim(),
+    authorEmails: authorEmails.map((email) => email.trim()),
+  }
+}
+
+export function parseSettingsUpdate(body: unknown): SettingsUpdate {
+  if (!isRecord(body) || !("github" in body)) {
+    throw new HttpError("Request body must contain the GitHub settings.", 400)
+  }
+  const github = parseGithubUpdate(body.github)
 
   const rawInstances = body.odooInstances
   if (
@@ -202,13 +218,7 @@ export function parseSettingsUpdate(body: unknown): SettingsUpdate {
     throw new HttpError("Each Odoo instance must be configured once.", 400)
   }
 
-  return {
-    github: {
-      token: token === null ? null : token.trim(),
-      authorEmails: authorEmails.map((email) => email.trim()),
-    },
-    odooInstances,
-  }
+  return { github, odooInstances }
 }
 
 /** Validates the decrypted settings document. */

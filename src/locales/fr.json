@@ -97,29 +97,34 @@
     "hideValue": "Masquer la valeur",
     "github": {
       "title": "GitHub",
-      "description": "Vos commits sont lus avec un token d'accès personnel.",
+      "description": "Facultatif. Pour récupérer vos commits ; sans token, collez-les.",
       "connectedAs": "Connecté en tant que {{login}}",
       "token": "Token d'accès personnel",
       "tokenHint": "Token classique avec le scope <code>repo</code>, ou token fine-grained avec un accès en lecture à Contents et Metadata.",
       "otherEmails": "Autres e-mails de commit",
-      "otherEmailsHint": "Facultatif. Ajoutez l'e-mail de votre configuration Git locale s'il n'est pas lié à votre compte GitHub, séparé par des virgules."
+      "otherEmailsHint": "Facultatif. Ajoutez l'e-mail de votre configuration Git locale s'il n'est pas lié à votre compte GitHub, séparé par des virgules.",
+      "disconnect": "Déconnecter GitHub",
+      "disconnected": "GitHub sera déconnecté à l'enregistrement."
     },
     "odoo": {
       "title": "Instance Odoo {{index}}",
-      "descriptionPrimary": "Les tâches sont d'abord cherchées ici.",
-      "descriptionSecondary": "Facultatif. Utilisée quand une tâche n'est pas trouvée dans l'instance 1.",
+      "descriptionPrimary": "Facultative si l'autre est remplie. Les tâches y sont cherchées en premier.",
+      "descriptionSecondary": "Facultative si l'autre est remplie. Cherchée quand une tâche n'est pas dans l'instance 1.",
       "name": "Nom",
       "url": "URL",
       "database": "Base de données",
       "databasePlaceholder": "Détectée si vide",
       "login": "Identifiant",
       "apiKey": "Clé API",
-      "apiKeyHint": "Dans Odoo : Préférences, Sécurité du compte, Nouvelle clé API. Un mot de passe fonctionne aussi si la double authentification est désactivée."
+      "apiKeyHint": "Dans Odoo : Préférences, Sécurité du compte, Nouvelle clé API. Un mot de passe fonctionne aussi si la double authentification est désactivée.",
+      "remove": "Retirer cette instance",
+      "removeHint": "Videz-la puis enregistrez : elle ne sera plus utilisée.",
+      "noneError": "Remplissez au moins une instance Odoo : une seule suffit."
     }
   },
   "setup": {
     "title": "Connectez vos comptes",
-    "description": "Pointage lit vos commits avec votre token GitHub et enregistre vos feuilles de temps avec votre identifiant et votre clé API Odoo."
+    "description": "Pointage enregistre vos feuilles de temps avec votre identifiant et votre clé API Odoo : une instance suffit. Un token GitHub, facultatif, permet de récupérer vos commits."
   },
   "period": {
     "label": "Période",
@@ -181,7 +186,9 @@
       "history": "Voir l'historique",
       "more_one": "et {{count}} autre ligne",
       "more_other": "et {{count}} autres lignes"
-    }
+    },
+    "noGithub": "Aucun token GitHub",
+    "noGithubHint": "Ajoutez-en un dans les paramètres pour récupérer vos commits, ou collez-les."
   },
   "status": {
     "pending": "En attente",

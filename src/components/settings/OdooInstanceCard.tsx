@@ -1,7 +1,10 @@
 import { useTranslation } from "react-i18next"
 
+import { Trash2Icon } from "lucide-react"
+
 import { SecretInput } from "@/components/settings/SecretInput"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardAction,
@@ -20,10 +23,7 @@ import { Input } from "@/components/ui/input"
 import { INSTANCE_BACKGROUNDS } from "@/lib/instanceColors"
 import { cn } from "@/lib/utils"
 import type { OdooInstanceIndex } from "@/types/timesheet"
-import {
-  isInstanceRequired,
-  type OdooInstanceDraft,
-} from "@/utils/settingsForm"
+import { isInstanceUsed, type OdooInstanceDraft } from "@/utils/settingsForm"
 
 const PLACEHOLDERS: Record<OdooInstanceIndex, { label: string; url: string }> =
   {
@@ -40,15 +40,19 @@ interface OdooInstanceCardProps {
   index: OdooInstanceIndex
   draft: OdooInstanceDraft
   onChange: (patch: Partial<OdooInstanceDraft>) => void
+  /** Empties the instance: saved so, it isn't used anymore. */
+  onRemove: () => void
 }
 
 export function OdooInstanceCard({
   index,
   draft,
   onChange,
+  onRemove,
 }: OdooInstanceCardProps) {
   const { t } = useTranslation()
-  const required = isInstanceRequired(index, draft)
+  // Either instance may stay empty; one filled in must be complete.
+  const required = isInstanceUsed(draft)
   const fieldId = (name: string) => `odoo-${index}-${name}`
 
   return (
@@ -138,6 +142,25 @@ export function OdooInstanceCard({
             />
             <FieldDescription>{t("settings.odoo.apiKeyHint")}</FieldDescription>
           </Field>
+          {(required || draft.hasStoredApiKey) && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                onClick={onRemove}
+              >
+                <Trash2Icon />
+                {t("settings.odoo.remove")}
+              </Button>
+              {draft.hasStoredApiKey && (
+                <span className="text-xs text-muted-foreground">
+                  {t("settings.odoo.removeHint")}
+                </span>
+              )}
+            </div>
+          )}
         </FieldGroup>
       </CardContent>
     </Card>

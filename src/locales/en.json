@@ -97,29 +97,34 @@
     "hideValue": "Hide value",
     "github": {
       "title": "GitHub",
-      "description": "Your commits are read with a personal access token.",
+      "description": "Optional. To fetch your commits; without a token, paste them.",
       "connectedAs": "Connected as {{login}}",
       "token": "Personal access token",
       "tokenHint": "Classic token with the <code>repo</code> scope, or a fine-grained token with read access to Contents and Metadata.",
       "otherEmails": "Other commit emails",
-      "otherEmailsHint": "Optional. Add the email of your local Git config when it isn't linked to your GitHub account, separated by commas."
+      "otherEmailsHint": "Optional. Add the email of your local Git config when it isn't linked to your GitHub account, separated by commas.",
+      "disconnect": "Disconnect GitHub",
+      "disconnected": "GitHub will be disconnected when you save."
     },
     "odoo": {
       "title": "Odoo instance {{index}}",
-      "descriptionPrimary": "Tasks are looked up here first.",
-      "descriptionSecondary": "Optional. Searched when a task isn't found in instance 1.",
+      "descriptionPrimary": "Optional when the other one is filled in. Tasks are looked up here first.",
+      "descriptionSecondary": "Optional when the other one is filled in. Searched when a task isn't in instance 1.",
       "name": "Name",
       "url": "URL",
       "database": "Database",
       "databasePlaceholder": "Detected when empty",
       "login": "Login",
       "apiKey": "API key",
-      "apiKeyHint": "In Odoo: Preferences, Account Security, New API Key. A password also works when two-factor authentication is off."
+      "apiKeyHint": "In Odoo: Preferences, Account Security, New API Key. A password also works when two-factor authentication is off.",
+      "remove": "Remove this instance",
+      "removeHint": "Empty it, then save: it won't be used anymore.",
+      "noneError": "Fill in at least one Odoo instance: one is enough."
     }
   },
   "setup": {
     "title": "Connect your accounts",
-    "description": "Pointage reads your commits with your GitHub token and logs your timesheets with your Odoo login and API key."
+    "description": "Pointage saves your timesheets with your Odoo login and API key: one instance is enough. An optional GitHub token fetches your commits."
   },
   "period": {
     "label": "Period",
@@ -181,7 +186,9 @@
       "history": "See the history",
       "more_one": "and {{count}} more line",
       "more_other": "and {{count}} more lines"
-    }
+    },
+    "noGithub": "No GitHub token",
+    "noGithubHint": "Add one in Settings to fetch your commits, or paste them."
   },
   "status": {
     "pending": "Pending",

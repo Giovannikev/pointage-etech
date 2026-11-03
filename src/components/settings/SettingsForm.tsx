@@ -11,6 +11,8 @@ import type { SettingsView } from "@/types/settings"
 import type { OdooInstanceIndex } from "@/types/timesheet"
 import { ODOO_INSTANCE_INDEXES } from "@/utils/settings"
 import {
+  EMPTY_INSTANCE,
+  hasSomeInstance,
   toSettingsDraft,
   toSettingsUpdate,
   type OdooInstanceDraft,
@@ -42,6 +44,10 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
     event: FormEvent<HTMLFormElement>
   ): Promise<void> => {
     event.preventDefault()
+    if (!hasSomeInstance(draft)) {
+      toast.error(t("settings.odoo.noneError"))
+      return
+    }
     setIsSaving(true)
     try {
       // Secrets are cleared from the form once stored: they're write-only.
@@ -71,6 +77,7 @@ export function SettingsForm({ settings }: { settings: SettingsView }) {
           index={index}
           draft={draft.instances[index]}
           onChange={(patch) => updateInstance(index, patch)}
+          onRemove={() => updateInstance(index, EMPTY_INSTANCE)}
         />
       ))}
       <div className="flex justify-end">

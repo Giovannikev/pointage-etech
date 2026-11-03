@@ -31,10 +31,12 @@ export interface OdooInstanceUpdate extends OdooInstanceSettings {
 }
 
 export interface SettingsUpdate {
+  /** null removes GitHub: commits are then only pasted. */
   github: {
-    /** null keeps the stored token. */
+    /** null keeps the stored token; without one, GitHub stays off. */
     token: string | null
     authorEmails: string[]
-  }
+  } | null
+  /** One instance or both, whichever. */
   odooInstances: OdooInstanceUpdate[]
 }

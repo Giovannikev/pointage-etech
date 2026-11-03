@@ -1,7 +1,10 @@
 import { Trans, useTranslation } from "react-i18next"
 
+import { UnplugIcon } from "lucide-react"
+
 import { SecretInput } from "@/components/settings/SecretInput"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardAction,
@@ -20,7 +23,10 @@ import { Input } from "@/components/ui/input"
 import type { GithubSettings } from "@/types/settings"
 import type { SettingsDraft } from "@/utils/settingsForm"
 
-type GithubDraft = Pick<SettingsDraft, "githubToken" | "authorEmails">
+type GithubDraft = Pick<
+  SettingsDraft,
+  "githubToken" | "authorEmails" | "hasStoredGithubToken"
+>
 
 interface GithubSettingsCardProps {
   draft: SettingsDraft
@@ -40,7 +46,7 @@ export function GithubSettingsCard({
       <CardHeader>
         <CardTitle>{t("settings.github.title")}</CardTitle>
         <CardDescription>{t("settings.github.description")}</CardDescription>
-        {stored !== null && (
+        {stored !== null && draft.hasStoredGithubToken && (
           <CardAction>
             <Badge variant="secondary" className="max-w-44 sm:max-w-none">
               <span className="truncate">
@@ -64,7 +70,6 @@ export function GithubSettingsCard({
                   ? t("settings.storedSecret")
                   : "ghp_… or github_pat_…"
               }
-              required={!draft.hasStoredGithubToken}
               onChange={(event) =>
                 onChange({ githubToken: event.target.value })
               }
@@ -93,6 +98,30 @@ export function GithubSettingsCard({
               {t("settings.github.otherEmailsHint")}
             </FieldDescription>
           </Field>
+          {draft.hasStoredGithubToken ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-fit text-destructive hover:text-destructive"
+              onClick={() =>
+                onChange({
+                  hasStoredGithubToken: false,
+                  githubToken: "",
+                  authorEmails: "",
+                })
+              }
+            >
+              <UnplugIcon />
+              {t("settings.github.disconnect")}
+            </Button>
+          ) : (
+            stored !== null && (
+              <p className="text-xs text-muted-foreground" role="status">
+                {t("settings.github.disconnected")}
+              </p>
+            )
+          )}
         </FieldGroup>
       </CardContent>
     </Card>

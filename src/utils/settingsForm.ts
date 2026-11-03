@@ -52,16 +52,29 @@ export function toSettingsDraft(settings: SettingsView): SettingsDraft {
   }
 }
 
-/** Instance 1 is mandatory; instance 2 is kept only when something is filled in. */
-export function isInstanceRequired(
-  index: OdooInstanceIndex,
-  draft: OdooInstanceDraft
-): boolean {
-  return (
-    index === 1 ||
-    [draft.label, draft.url, draft.db, draft.login, draft.apiKey].some(
-      (value) => value.trim() !== ""
-    )
+/**
+ * An instance is kept when something is filled in: either one alone is
+ * enough (a user may work on Edoo IT only), but at least one is needed.
+ */
+export function isInstanceUsed(draft: OdooInstanceDraft): boolean {
+  return [draft.label, draft.url, draft.db, draft.login, draft.apiKey].some(
+    (value) => value.trim() !== ""
+  )
+}
+
+/** An instance with nothing in it: "Remove" empties a configured one. */
+export const EMPTY_INSTANCE: OdooInstanceDraft = {
+  label: "",
+  url: "",
+  db: "",
+  login: "",
+  apiKey: "",
+  hasStoredApiKey: false,
+}
+
+export function hasSomeInstance(draft: SettingsDraft): boolean {
+  return ODOO_INSTANCE_INDEXES.some((index) =>
+    isInstanceUsed(draft.instances[index])
   )
 }
 
@@ -85,15 +98,20 @@ function toInstanceUpdate(
 }
 
 export function toSettingsUpdate(draft: SettingsDraft): SettingsUpdate {
+  const token = toOptionalSecret(draft.githubToken)
   return {
-    github: {
-      token: toOptionalSecret(draft.githubToken),
-      authorEmails: draft.authorEmails
-        .split(/[\s,;]+/)
-        .filter((email) => email !== ""),
-    },
+    // No token typed and none kept: GitHub is off (or was disconnected).
+    github:
+      token === null && !draft.hasStoredGithubToken
+        ? null
+        : {
+            token,
+            authorEmails: draft.authorEmails
+              .split(/[\s,;]+/)
+              .filter((email) => email !== ""),
+          },
     odooInstances: ODOO_INSTANCE_INDEXES.filter((index) =>
-      isInstanceRequired(index, draft.instances[index])
+      isInstanceUsed(draft.instances[index])
     ).map((index) => toInstanceUpdate(index, draft.instances[index])),
   }
 }

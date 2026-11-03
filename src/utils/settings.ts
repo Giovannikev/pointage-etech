@@ -3,9 +3,12 @@ import type { OdooInstanceIndex, OdooTaskMatch } from "@/types/timesheet"
 
 export const ODOO_INSTANCE_INDEXES: readonly OdooInstanceIndex[] = [1, 2]
 
-/** Commits need a GitHub token, timesheets need at least one Odoo instance. */
+/**
+ * Timesheets need one Odoo instance. GitHub is optional: without it,
+ * commits are pasted instead of fetched.
+ */
 export function isSetupComplete(settings: SettingsView): boolean {
-  return settings.github !== null && settings.odooInstances.length > 0
+  return settings.odooInstances.length > 0
 }
 
 export function getInstanceLabel(

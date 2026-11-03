@@ -9,13 +9,17 @@ import type {
   UserSettings,
 } from "../_shared/settings.ts"
 
+/** GitHub is optional: no token (or a removal) leaves it off. */
 async function resolveGithub(
   stored: GithubSettings | null,
   update: SettingsUpdate["github"]
-): Promise<GithubSettings> {
+): Promise<GithubSettings | null> {
+  if (update === null) {
+    return null
+  }
   const token = update.token ?? stored?.token
   if (token === undefined) {
-    throw new HttpError("Enter your GitHub token.", 400)
+    return null
   }
   if (stored !== null && token === stored.token) {
     return { ...stored, authorEmails: update.authorEmails }
