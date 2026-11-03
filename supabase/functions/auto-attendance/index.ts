@@ -26,6 +26,11 @@
  * a check-out by hand stays until the next planned time. A punch that fails
  * is retried by the next runs, for 30 minutes.
  *
+ * Each run also logs the timesheet routines due (timesheet_routines): a
+ * line on an Odoo task every working day at a set time, 17:00 by default.
+ * A day off (time off or public holiday over the whole schedule) is
+ * skipped, and so is a task the user already logged time on that day.
+ *
  * POST {}                                   the cron run
  * POST { "dryRun": true, "at"?: ISO time }  shows the day's plan, punches nothing
  *
@@ -71,6 +76,14 @@ import { loadSettings } from "../_shared/settingsStore.ts"
 import { isRecord } from "../_shared/validation.ts"
 
 const TABLE = "auto_attendance_preferences"
+const ROUTINES_TABLE = "timesheet_routines"
+/** How long after its time a routine that couldn't be logged is retried. */
+const ROUTINE_CATCH_UP_MINUTES = 120
+/** The day off check's schedule for users without automatic attendance. */
+const DEFAULT_SCHEDULE: WorkSchedule = {
+  morning: [9 * 60, 12 * 60 + 30],
+  afternoon: [13 * 60 + 30, 17 * 60 + 30],
+}
 /** How long a planned punch that couldn't be made is retried. */
 const CATCH_UP_MINUTES = 30
 /** Pending and approved requests: a refused or cancelled one doesn't count. */
@@ -576,6 +589,246 @@ async function dryRun(preferences: Preference[], now: Date) {
   )
 }
 
+/* ------------------------------------------------------------------ */
+/* Timesheet routines                                                  */
+/* ------------------------------------------------------------------ */
+
+interface Routine {
+  id: string
+  userId: string
+  instanceIndex: 1 | 2
+  projectId: number
+  taskId: number
+  description: string
+  hours: number
+  logAt: Minute
+  timezone: string
+  lastLoggedOn: string | null
+}
+
+type RoutineOutcome = "logged" | "found" | "day_off" | "failed"
+
+const ROUTINE_COLUMNS =
+  "id, user_id, instance_index, project_id, task_id, description, hours, log_at, timezone, last_logged_on"
+
+function readRoutine(row: unknown): Routine | null {
+  if (
+    !isRecord(row) ||
+    typeof row.id !== "string" ||
+    typeof row.user_id !== "string" ||
+    (row.instance_index !== 1 && row.instance_index !== 2) ||
+    typeof row.project_id !== "number" ||
+    typeof row.task_id !== "number" ||
+    typeof row.description !== "string" ||
+    typeof row.log_at !== "string" ||
+    typeof row.timezone !== "string"
+  ) {
+    return null
+  }
+  // numeric columns come back as numbers or strings.
+  const hours = Number(row.hours)
+  const logAt = parseClock(row.log_at.slice(0, 5))
+  if (!Number.isFinite(hours) || hours <= 0 || logAt === null) return null
+  return {
+    id: row.id,
+    userId: row.user_id,
+    instanceIndex: row.instance_index,
+    projectId: row.project_id,
+    taskId: row.task_id,
+    description: row.description,
+    hours,
+    logAt,
+    timezone: row.timezone,
+    lastLoggedOn:
+      typeof row.last_logged_on === "string" ? row.last_logged_on : null,
+  }
+}
+
+/** The local day the routine is due on at `now`, or null when it isn't. */
+function routineDueOn(routine: Routine, now: Date): string | null {
+  const local = localMoment(now, routine.timezone)
+  if (
+    local === null ||
+    local.weekday > 5 ||
+    local.minute < routine.logAt ||
+    local.minute > routine.logAt + ROUTINE_CATCH_UP_MINUTES ||
+    routine.lastLoggedOn === local.date
+  ) {
+    return null
+  }
+  return local.date
+}
+
+/**
+ * True when the user doesn't work on `date`: time off and public holidays
+ * leave no punch in their schedule. Without Attendances in Odoo, every
+ * weekday is worked.
+ */
+async function isDayOff(
+  userId: string,
+  date: string,
+  timezone: string,
+  preferences: Map<string, Preference>
+): Promise<boolean> {
+  let found: { session: OdooSession; employeeId: number }
+  try {
+    found = await findAttendanceInstance(userId)
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 400) return false
+    throw error
+  }
+  const preference: Preference = preferences.get(userId) ?? {
+    userId,
+    timezone,
+    schedule: DEFAULT_SCHEDULE,
+    remoteAfternoonEnd: null,
+    randomWindow: 0,
+    lastPunchAt: null,
+    nextPunchAt: null,
+  }
+  const plan = await planDay(found.session, found.employeeId, preference, date)
+  return plan.punches.length === 0
+}
+
+/**
+ * Logs the routine's line on `date`, unless the user already logged time on
+ * the task that day (by hand or by an earlier run): then it does nothing.
+ */
+async function logRoutine(
+  session: OdooSession,
+  routine: Routine,
+  date: string
+): Promise<"logged" | "found"> {
+  const existing = await executeKw(
+    session,
+    "account.analytic.line",
+    "search_count",
+    [
+      [
+        ["task_id", "=", routine.taskId],
+        ["date", "=", date],
+        ["user_id", "=", session.uid],
+      ],
+    ]
+  )
+  if (typeof existing === "number" && existing > 0) return "found"
+  await executeKw(session, "account.analytic.line", "create", [
+    {
+      name: routine.description,
+      project_id: routine.projectId,
+      task_id: routine.taskId,
+      unit_amount: routine.hours,
+      date,
+    },
+  ])
+  return "logged"
+}
+
+async function markRoutines(ids: string[], date: string): Promise<void> {
+  const { error } = await getAdminClient()
+    .from(ROUTINES_TABLE)
+    .update({ last_logged_on: date })
+    .in("id", ids)
+  if (error !== null) {
+    throw new HttpError(`Couldn't record the routine: ${error.message}`, 500)
+  }
+}
+
+/** One user's routines due on `date`. */
+async function runUserRoutines(
+  routines: Routine[],
+  date: string,
+  preferences: Map<string, Preference>
+): Promise<RoutineOutcome[]> {
+  const { userId, timezone } = routines[0]
+  if (await isDayOff(userId, date, timezone, preferences)) {
+    await markRoutines(
+      routines.map((routine) => routine.id),
+      date
+    )
+    console.log(`auto-attendance: user ${userId}: day off, no routine logged`)
+    return routines.map(() => "day_off")
+  }
+  const getSession = createSessionPool(
+    (await loadSettings(userId)).odooInstances
+  )
+  const outcomes: RoutineOutcome[] = []
+  for (const routine of routines) {
+    try {
+      const outcome = await logRoutine(
+        await getSession(routine.instanceIndex),
+        routine,
+        date
+      )
+      await markRoutines([routine.id], date)
+      outcomes.push(outcome)
+      console.log(
+        `auto-attendance: user ${userId}: routine ${routine.id} ${outcome} on ${date}`
+      )
+    } catch (failure) {
+      // Retried by the next runs, within the catch-up time.
+      outcomes.push("failed")
+      console.error(
+        `auto-attendance: user ${userId}: routine ${routine.id}:`,
+        failure instanceof Error ? failure.message : failure
+      )
+    }
+  }
+  return outcomes
+}
+
+/** Logs every routine due at `now`. */
+async function runRoutines(
+  now: Date,
+  preferences: Preference[]
+): Promise<Record<RoutineOutcome, number>> {
+  const summary: Record<RoutineOutcome, number> = {
+    logged: 0,
+    found: 0,
+    day_off: 0,
+    failed: 0,
+  }
+  const { data, error } = await getAdminClient()
+    .from(ROUTINES_TABLE)
+    .select(ROUTINE_COLUMNS)
+    .eq("enabled", true)
+  if (error !== null) {
+    throw new HttpError(`Couldn't read the routines: ${error.message}`, 500)
+  }
+  // Grouped by user and day: the day off check reads Odoo once for all.
+  const due = new Map<string, { date: string; routines: Routine[] }>()
+  for (const row of data ?? []) {
+    const routine = readRoutine(row)
+    const date = routine === null ? null : routineDueOn(routine, now)
+    if (routine === null || date === null) continue
+    const key = `${routine.userId}|${date}`
+    const group = due.get(key) ?? { date, routines: [] }
+    group.routines.push(routine)
+    due.set(key, group)
+  }
+  const byUser = new Map(
+    preferences.map((preference) => [preference.userId, preference])
+  )
+  for (const { date, routines } of due.values()) {
+    try {
+      for (const outcome of await runUserRoutines(routines, date, byUser)) {
+        summary[outcome] += 1
+      }
+    } catch (failure) {
+      summary.failed += routines.length
+      console.error(
+        `auto-attendance: user ${routines[0].userId}: routines:`,
+        failure instanceof Error ? failure.message : failure
+      )
+    }
+  }
+  return summary
+}
+
+/* ------------------------------------------------------------------ */
+/* Requests                                                            */
+/* ------------------------------------------------------------------ */
+
 function json(
   body: unknown,
   status = 200,
@@ -693,7 +946,15 @@ Deno.serve(async (request) => {
         )
       }
     }
-    return json(summary)
+    let routines: Record<RoutineOutcome, number> | { error: string }
+    try {
+      routines = await runRoutines(now, preferences)
+    } catch (failure) {
+      routines = {
+        error: failure instanceof Error ? failure.message : String(failure),
+      }
+    }
+    return json({ ...summary, routines })
   } catch (failure) {
     if (failure instanceof HttpError) {
       return json({ error: failure.message }, failure.status)

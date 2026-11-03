@@ -674,5 +674,26 @@
     "message": "Appuyez sur <keys/> pour recharger la page.",
     "reloadAction": "Recharger",
     "dismiss": "Masquer"
+  },
+  "routines": {
+    "title": "Saisies automatiques",
+    "hint": "Pointées dans Odoo chaque jour ouvré à leur heure, sauf en congé ou jour férié, et si la tâche n'est pas déjà pointée ce jour-là.",
+    "make": "Pointer chaque jour automatiquement",
+    "createTitle": "Pointer chaque jour automatiquement",
+    "editTitle": "Modifier la saisie automatique",
+    "dialogHint": "Cette ligne sera pointée chaque jour ouvré à cette heure, sauf en congé ou jour férié. Si la tâche est déjà pointée ce jour-là, rien n'est ajouté.",
+    "time": "Heure",
+    "hours": "Durée (h)",
+    "description": "Description",
+    "save": "Enregistrer",
+    "at": "chaque jour à {{time}}",
+    "paused": "En pause",
+    "pause": "Mettre en pause",
+    "resume": "Reprendre",
+    "pausedToast": "Saisie automatique en pause",
+    "resumedToast": "Saisie automatique reprise",
+    "deleted": "Saisie automatique supprimée",
+    "saved": "Saisie automatique enregistrée",
+    "created": "Saisie automatique créée : elle sera pointée chaque jour ouvré"
   }
 }

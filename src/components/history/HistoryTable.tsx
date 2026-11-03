@@ -5,6 +5,7 @@ import {
   LockIcon,
   PencilIcon,
   PlusIcon,
+  RepeatIcon,
   Trash2Icon,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -40,11 +41,16 @@ interface HistoryTableProps {
   days: HistoryDay[]
   onEdit: (entry: TimesheetHistoryEntry) => void
   onDelete: (entry: TimesheetHistoryEntry) => void
+  /** Logs the line's task every working day; task lines only. */
+  onMakeRoutine: (entry: TimesheetHistoryEntry) => void
   /** Logs the missing hours of a short day. */
   onCompleteDay: (day: HistoryDay) => void
 }
 
-type EntryActionsProps = Pick<HistoryTableProps, "onEdit" | "onDelete"> & {
+type EntryActionsProps = Pick<
+  HistoryTableProps,
+  "onEdit" | "onDelete" | "onMakeRoutine"
+> & {
   entry: TimesheetHistoryEntry
 }
 
@@ -52,7 +58,12 @@ function entryKey(entry: TimesheetHistoryEntry): string {
   return `${entry.instanceIndex}:${entry.timesheetId}`
 }
 
-function EntryActions({ entry, onEdit, onDelete }: EntryActionsProps) {
+function EntryActions({
+  entry,
+  onEdit,
+  onDelete,
+  onMakeRoutine,
+}: EntryActionsProps) {
   const { t } = useTranslation()
   if (entry.locked) {
     return (
@@ -89,6 +100,14 @@ function EntryActions({ entry, onEdit, onDelete }: EntryActionsProps) {
           <PencilIcon />
           {t("history.edit")}
         </DropdownMenuItem>
+        {entry.taskId !== null &&
+          entry.projectId !== null &&
+          entry.ticketId === null && (
+            <DropdownMenuItem onSelect={() => onMakeRoutine(entry)}>
+              <RepeatIcon />
+              {t("routines.make")}
+            </DropdownMenuItem>
+          )}
         <DropdownMenuItem
           variant="destructive"
           onSelect={() => onDelete(entry)}
@@ -172,6 +191,7 @@ export function HistoryTable({
   days,
   onEdit,
   onDelete,
+  onMakeRoutine,
   onCompleteDay,
 }: HistoryTableProps) {
   const { t } = useTranslation()
@@ -202,6 +222,7 @@ export function HistoryTable({
                       entry={entry}
                       onEdit={onEdit}
                       onDelete={onDelete}
+                      onMakeRoutine={onMakeRoutine}
                     />
                   </div>
                   <p className="text-sm text-muted-foreground">
@@ -277,6 +298,7 @@ export function HistoryTable({
                         entry={entry}
                         onEdit={onEdit}
                         onDelete={onDelete}
+                        onMakeRoutine={onMakeRoutine}
                       />
                     </TableCell>
                   </TableRow>

@@ -674,5 +674,26 @@
     "message": "Press <keys/> to reload the page.",
     "reloadAction": "Reload",
     "dismiss": "Dismiss"
+  },
+  "routines": {
+    "title": "Automatic entries",
+    "hint": "Logged in Odoo every working day at their time, except on time off or public holidays, and unless the task already has time logged that day.",
+    "make": "Log every day automatically",
+    "createTitle": "Log every day automatically",
+    "editTitle": "Edit the automatic entry",
+    "dialogHint": "This line will be logged every working day at this time, except on time off or public holidays. If the task already has time logged that day, nothing is added.",
+    "time": "Time",
+    "hours": "Duration (h)",
+    "description": "Description",
+    "save": "Save",
+    "at": "every day at {{time}}",
+    "paused": "Paused",
+    "pause": "Pause",
+    "resume": "Resume",
+    "pausedToast": "Automatic entry paused",
+    "resumedToast": "Automatic entry resumed",
+    "deleted": "Automatic entry deleted",
+    "saved": "Automatic entry saved",
+    "created": "Automatic entry created: it will be logged every working day"
   }
 }

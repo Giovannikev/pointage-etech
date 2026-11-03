@@ -16,6 +16,11 @@ import {
 import { HistorySummaryPanel } from "@/components/history/HistorySummaryPanel"
 import { HistoryTable } from "@/components/history/HistoryTable"
 import { HistoryWeekGrid } from "@/components/history/HistoryWeekGrid"
+import {
+  RoutineDialog,
+  type RoutineTarget,
+} from "@/components/history/RoutineDialog"
+import { TimesheetRoutinesCard } from "@/components/history/TimesheetRoutinesCard"
 import { SettingsGate } from "@/components/settings/SettingsGate"
 import { CommitPeriodPicker } from "@/components/timesheet/CommitPeriodPicker"
 import { DeleteTimesheetDialog } from "@/components/timesheet/DeleteTimesheetDialog"
@@ -75,6 +80,7 @@ import {
   summarizeHistory,
   type HistoryDay,
 } from "@/utils/history"
+import { DEFAULT_ROUTINE_TIME } from "@/services/timesheetRoutineService"
 import { getPresetPeriod, isValidPeriod } from "@/utils/period"
 import { getInstanceLabel } from "@/utils/settings"
 import { roundHours, WORKDAY_HOURS } from "@/utils/timesheetRules"
@@ -117,6 +123,23 @@ function toEditable(entry: TimesheetHistoryEntry): EditableTimesheet {
       entry.taskName ??
       entry.projectName ??
       entry.description,
+  }
+}
+
+/** A routine logging the line's task every working day, null without a task. */
+function toRoutine(entry: TimesheetHistoryEntry): RoutineTarget | null {
+  if (entry.taskId === null || entry.projectId === null) {
+    return null
+  }
+  return {
+    instanceIndex: entry.instanceIndex,
+    projectId: entry.projectId,
+    projectName: entry.projectName,
+    taskId: entry.taskId,
+    taskName: entry.taskName ?? entry.description,
+    description: entry.description,
+    hours: entry.hours,
+    logAt: DEFAULT_ROUTINE_TIME,
   }
 }
 
@@ -177,6 +200,7 @@ function HistoryResultsView({
   const editDialog = useDialogTarget<EditableTimesheet>()
   const deleteDialog = useDialogTarget<EditableTimesheet>()
   const completeDialog = useDialogTarget<DayToComplete>()
+  const routineDialog = useDialogTarget<RoutineTarget>()
 
   const { from, to } = period
   const queryKey = `history:${from}:${to}`
@@ -402,6 +426,12 @@ function HistoryResultsView({
           days={days}
           onEdit={(entry) => editDialog.open(toEditable(entry))}
           onDelete={(entry) => deleteDialog.open(toEditable(entry))}
+          onMakeRoutine={(entry) => {
+            const routine = toRoutine(entry)
+            if (routine !== null) {
+              routineDialog.open(routine)
+            }
+          }}
           onCompleteDay={openCompleteDay}
         />
       ) : (
@@ -447,6 +477,15 @@ function HistoryResultsView({
         entries={allEntries}
         onOpenChange={(open) => !open && completeDialog.close()}
         onLogged={handleDayCompleted}
+      />
+      <RoutineDialog
+        open={routineDialog.isOpen}
+        target={routineDialog.target}
+        onOpenChange={(open) => !open && routineDialog.close()}
+        onSaved={() => {
+          routineDialog.close()
+          toast.success(t("routines.created"))
+        }}
       />
     </>
   )
@@ -519,6 +558,8 @@ function HistoryWorkspace() {
           }}
         />
       )}
+
+      <TimesheetRoutinesCard />
     </>
   )
 }
