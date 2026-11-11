@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
-  AGENT_ONLINE_MS,
   CLAUDE_PROMPT_MAX_LENGTH,
-  JOB_TTL_MS,
-  isAgentOnline,
-  isJobExpired,
   buildClaudeCodeUrl,
   truncateText,
 } from "@/utils/claudeCode"
@@ -40,28 +36,5 @@ describe("truncateText", () => {
   })
   it("ends a cut text with an ellipsis", () => {
     expect(truncateText("a long text", 7)).toBe("a long…")
-  })
-})
-
-describe("isAgentOnline", () => {
-  const seen = "2026-11-11T10:00:00Z"
-  const at = Date.parse(seen)
-  it("is online within three minutes", () => {
-    expect(isAgentOnline(seen, at + AGENT_ONLINE_MS)).toBe(true)
-  })
-  it("is offline past them", () => {
-    expect(isAgentOnline(seen, at + AGENT_ONLINE_MS + 1)).toBe(false)
-  })
-  it("is offline on an unreadable date", () => {
-    expect(isAgentOnline("never", at)).toBe(false)
-  })
-})
-
-describe("isJobExpired", () => {
-  const created = "2026-11-11T10:00:00Z"
-  const at = Date.parse(created)
-  it("waits ten minutes", () => {
-    expect(isJobExpired(created, at + JOB_TTL_MS)).toBe(false)
-    expect(isJobExpired(created, at + JOB_TTL_MS + 1)).toBe(true)
   })
 })

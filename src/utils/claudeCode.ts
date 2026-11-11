@@ -127,20 +127,3 @@ export function saveProjectFolder(project: ProjectRef, folder: string): void {
     // Storage blocked: the folder is just not remembered.
   }
 }
-
-/* ---- The agent of the user's computer -------------------------------- */
-
-/** The agent says it is online every minute: past this, it is offline. */
-export const AGENT_ONLINE_MS = 3 * 60_000
-/** The agent no longer starts a job older than this (scripts/claudeAgentCore.ts). */
-export const JOB_TTL_MS = 10 * 60_000
-
-export function isAgentOnline(lastSeenAt: string, now: number): boolean {
-  const seen = Date.parse(lastSeenAt)
-  return !Number.isNaN(seen) && now - seen <= AGENT_ONLINE_MS
-}
-
-export function isJobExpired(createdAt: string, now: number): boolean {
-  const created = Date.parse(createdAt)
-  return Number.isNaN(created) || now - created > JOB_TTL_MS
-}

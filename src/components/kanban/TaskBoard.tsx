@@ -236,7 +236,7 @@ export function TaskBoard({ scope }: TaskBoardProps) {
   const quickLog = useDialogTarget<LogTarget>()
   const taskNote = useDialogTarget<KanbanTask>()
   const claudeTask = useDialogTarget<KanbanTask>()
-  // A phone has no Claude Desktop: it sends the task to the computer's agent.
+  // Claude Desktop runs on a computer: no button on a phone.
   const isMobile = useIsMobile()
   const taskDetails = useTaskDetails()
 
@@ -605,13 +605,13 @@ export function TaskBoard({ scope }: TaskBoardProps) {
     [data, saving, groupBy, changeStatus, moveTask, taskNote.open]
   )
 
-  /** Open tasks can be handed to a Claude Code session. */
+  /** Open tasks can be handed to a Claude Code session in Claude Desktop. */
   const claudeActionOf = useCallback(
     (task: KanbanTask) =>
-      data === undefined || !isOpenBoardTask(data, task)
+      isMobile || data === undefined || !isOpenBoardTask(data, task)
         ? undefined
         : claudeTask.open,
-    [data, claudeTask.open]
+    [isMobile, data, claudeTask.open]
   )
 
   /** All tasks names who works on each task, once the users are known. */
@@ -990,7 +990,6 @@ export function TaskBoard({ scope }: TaskBoardProps) {
       <ClaudeTaskDialog
         open={claudeTask.isOpen}
         task={claudeTask.target}
-        remote={isMobile}
         onOpenChange={(open) => !open && claudeTask.close()}
       />
       <TaskDetailsDialog

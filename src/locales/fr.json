@@ -714,23 +714,6 @@
     "promptStage": "Étape : {{stage}}",
     "promptLink": "Tâche dans Odoo : {{url}}",
     "promptDescription": "Description de la tâche :",
-    "promptOutro": "Suis le skill odoo-ticket-dev de bout en bout.",
-    "remote": {
-      "submit": "Lancer sur mon PC",
-      "promptHint": "Modifiables. L'agent Claude de votre PC lance la session ; suivez-la dans l'app Claude (Remote Control).",
-      "yourComputer": "votre PC",
-      "lookingForAgent": "Recherche de votre PC…",
-      "agentError": "Impossible de joindre votre PC : {{message}}",
-      "noAgent": "Aucun agent Claude n'est installé sur un ordinateur. Voir « Claude agent » dans le README.",
-      "online": "{{host}} est en ligne.",
-      "offline": "{{host}} est hors ligne depuis {{time}}. La demande l'attendra 10 minutes.",
-      "sendError": "Demande non envoyée : {{message}}",
-      "waiting": "Demande envoyée, en attente de votre PC…",
-      "launching": "Lancement de la session sur {{host}}…",
-      "failed": "Échec sur {{host}} : {{message}}",
-      "expired": "Votre PC n'a pas pris la demande à temps. Vérifiez que l'agent tourne, puis relancez.",
-      "started": "Session lancée sur {{host}}",
-      "startedHint": "Suivez « {{name}} » dans l'app Claude ou sur claude.ai/code."
-    }
+    "promptOutro": "Suis le skill odoo-ticket-dev de bout en bout."
   }
 }
