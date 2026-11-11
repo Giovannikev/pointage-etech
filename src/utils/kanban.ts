@@ -194,6 +194,21 @@ export function isClosedTask(
   )
 }
 
+/** Still to be done: neither closed nor in a folded stage of its instance. */
+export function isOpenBoardTask(
+  results: MyTasksInstanceResult[],
+  task: KanbanTask
+): boolean {
+  const result = results.find(
+    (item) => item.ok && item.instanceIndex === task.instanceIndex
+  )
+  const stage =
+    result?.ok === true && task.stageId !== null
+      ? result.stages.find((item) => item.stageId === task.stageId)
+      : undefined
+  return !isClosedTask(task, stage)
+}
+
 /** The tasks of the selected instances, without closed ones unless asked. */
 function scopeTasks(
   results: MyTasksInstanceResult[],

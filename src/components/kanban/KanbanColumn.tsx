@@ -30,6 +30,10 @@ interface KanbanColumnProps {
   drop?: ColumnDrop
   /** Names the assignees on each task card (All tasks page). */
   assigneesOf?: (task: KanbanTask) => string[]
+  /** The "Do with Claude" action of a task card; none when undefined. */
+  claudeActionOf?: (
+    task: KanbanTask
+  ) => ((task: KanbanTask) => void) | undefined
 }
 
 /** What the dragged card would become in this column. */
@@ -94,6 +98,7 @@ export function KanbanColumn({
   cardEditing,
   drop,
   assigneesOf,
+  claudeActionOf,
 }: KanbanColumnProps) {
   const { t } = useTranslation()
   const { formatHours } = useFormatters()
@@ -192,6 +197,7 @@ export function KanbanColumn({
                 onLogTime={(task) => onLogTime(taskTarget(task))}
                 editing={cardEditing?.(card.task)}
                 assignees={assigneesOf?.(card.task)}
+                onDoWithClaude={claudeActionOf?.(card.task)}
               />
             ) : (
               <TicketCard

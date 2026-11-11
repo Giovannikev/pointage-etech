@@ -11,6 +11,7 @@ import {
   cardKey,
   countClosedTasks,
   findColumnStage,
+  isOpenBoardTask,
   listMoveTargets,
   moveToStage,
   replaceTask,
@@ -470,5 +471,23 @@ describe("editing from the board", () => {
     const column = columns.find((c) => c.name === "Test interne")
     expect(taskIds([column!])).toEqual([308])
     expect(next[1]).toBe(board[1])
+  })
+})
+
+describe("isOpenBoardTask", () => {
+  const tasks = results.flatMap((result) => (result.ok ? result.tasks : []))
+  const task = (taskId: number) => tasks.find((item) => item.taskId === taskId)!
+
+  it("is open in an unfolded stage", () => {
+    expect(isOpenBoardTask(results, task(1))).toBe(true)
+  })
+  it("is closed in a folded stage", () => {
+    expect(isOpenBoardTask(results, task(2))).toBe(false)
+  })
+  it("is closed when done", () => {
+    expect(isOpenBoardTask(results, task(3))).toBe(false)
+  })
+  it("is open without a stage", () => {
+    expect(isOpenBoardTask(results, task(5))).toBe(true)
   })
 })

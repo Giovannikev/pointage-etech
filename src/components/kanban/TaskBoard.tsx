@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { AssigneeFilter } from "@/components/kanban/AssigneeFilter"
+import { ClaudeTaskDialog } from "@/components/kanban/ClaudeTaskDialog"
 import type { CardEditing } from "@/components/kanban/KanbanCard"
 import { KanbanColumn, type ColumnDrop } from "@/components/kanban/KanbanColumn"
 import { ProjectFilter } from "@/components/kanban/ProjectFilter"
@@ -51,6 +52,7 @@ import { useCachedQuery } from "@/hooks/useCachedQuery"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useDialogTarget } from "@/hooks/useDialogTarget"
 import { useFormatters } from "@/hooks/useFormatters"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useTaskDetails } from "@/hooks/useTaskDetails"
 import { useSyncViewParams } from "@/hooks/useViewParams"
 import { cn } from "@/lib/utils"
@@ -84,6 +86,7 @@ import {
   countClosedTasks,
   findColumnStage,
   isClosedTask,
+  isOpenBoardTask,
   listMoveTargets,
   listProjects,
   listTickets,
@@ -232,6 +235,9 @@ export function TaskBoard({ scope }: TaskBoardProps) {
   const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set())
   const quickLog = useDialogTarget<LogTarget>()
   const taskNote = useDialogTarget<KanbanTask>()
+  const claudeTask = useDialogTarget<KanbanTask>()
+  // A phone has no Claude Desktop: it sends the task to the computer's agent.
+  const isMobile = useIsMobile()
   const taskDetails = useTaskDetails()
 
   /* ---- What Odoo is asked for (All tasks) -------------------------- */
@@ -599,6 +605,15 @@ export function TaskBoard({ scope }: TaskBoardProps) {
     [data, saving, groupBy, changeStatus, moveTask, taskNote.open]
   )
 
+  /** Open tasks can be handed to a Claude Code session. */
+  const claudeActionOf = useCallback(
+    (task: KanbanTask) =>
+      data === undefined || !isOpenBoardTask(data, task)
+        ? undefined
+        : claudeTask.open,
+    [data, claudeTask.open]
+  )
+
   /** All tasks names who works on each task, once the users are known. */
   const assigneesOf = useMemo(
     () =>
@@ -766,6 +781,7 @@ export function TaskBoard({ scope }: TaskBoardProps) {
               cardEditing={cardEditing}
               drop={columnDrop(column)}
               assigneesOf={assigneesOf}
+              claudeActionOf={claudeActionOf}
             />
           ))}
         </div>
@@ -970,6 +986,12 @@ export function TaskBoard({ scope }: TaskBoardProps) {
         }
         onOpenChange={(open) => !open && taskNote.close()}
         onPosted={handleNotePosted}
+      />
+      <ClaudeTaskDialog
+        open={claudeTask.isOpen}
+        task={claudeTask.target}
+        remote={isMobile}
+        onOpenChange={(open) => !open && claudeTask.close()}
       />
       <TaskDetailsDialog
         state={taskDetails.state}

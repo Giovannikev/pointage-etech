@@ -1,5 +1,6 @@
 import { useState } from "react"
 import {
+  BotIcon,
   CalendarClockIcon,
   EllipsisVerticalIcon,
   Loader2Icon,
@@ -75,6 +76,8 @@ interface KanbanCardProps {
   editing?: CardEditing
   /** Who the task is assigned to, by name; not shown when undefined. */
   assignees?: string[]
+  /** Starts a Claude Code session on the task; no button when undefined. */
+  onDoWithClaude?: (task: KanbanTask) => void
 }
 
 /** Card menu: chatter note, and "Move to", the keyboard and touch way to change the stage. */
@@ -181,6 +184,7 @@ export function KanbanCard({
   onLogTime,
   editing,
   assignees,
+  onDoWithClaude,
 }: KanbanCardProps) {
   const { t } = useTranslation()
   const { formatShortDate } = useFormatters()
@@ -316,30 +320,47 @@ export function KanbanCard({
           <TaskHours task={task} />
         </div>
 
-        {canLog ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={() => onLogTime(task)}
-          >
-            <TimerIcon />
-            {t("kanban.logTime")}
-          </Button>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* A disabled button gets no pointer events: the span carries the tooltip. */}
-              <span tabIndex={0} className="shrink-0 rounded-lg">
-                <Button variant="outline" size="sm" disabled>
-                  <TimerIcon />
-                  {t("kanban.logTime")}
+        <div className="flex shrink-0 items-center gap-1">
+          {onDoWithClaude !== undefined && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  aria-label={t("claudeTask.button")}
+                  onClick={() => onDoWithClaude(task)}
+                >
+                  <BotIcon />
                 </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{t("kanban.noProject")}</TooltipContent>
-          </Tooltip>
-        )}
+              </TooltipTrigger>
+              <TooltipContent>{t("claudeTask.button")}</TooltipContent>
+            </Tooltip>
+          )}
+          {canLog ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => onLogTime(task)}
+            >
+              <TimerIcon />
+              {t("kanban.logTime")}
+            </Button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                {/* A disabled button gets no pointer events: the span carries the tooltip. */}
+                <span tabIndex={0} className="shrink-0 rounded-lg">
+                  <Button variant="outline" size="sm" disabled>
+                    <TimerIcon />
+                    {t("kanban.logTime")}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t("kanban.noProject")}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       </div>
     </article>
   )

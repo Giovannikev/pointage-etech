@@ -485,6 +485,99 @@ internal note, like _Log note_ in the chatter, keeping its lines and
 indentation. `approve` then writes `state = 03_approved` (Odoo 17+) or
 `kanban_state = done` (up to 16) and reads the task back to check it.
 
+## Do with Claude
+
+Open tasks of _My tasks_ and _All tasks_ have a **Do with Claude** button. It
+opens instructions for Claude (the task, its project, its Odoo link and its
+description), which can be edited, then:
+
+- **On a computer**, it opens Claude Desktop on a new Claude Code session
+  (`claude://code/new`), with the instructions ready to send, in the folder
+  typed in the dialog (remembered for each project, in this browser only).
+- **On a phone**, it sends the task to the **Claude agent** of your computer,
+  which starts the session there. Follow it and answer it from the Claude
+  app or claude.ai/code (Remote Control).
+
+### Claude agent
+
+`scripts/claudeAgent.ts` runs on your computer. It needs the
+`20261111000000_claude_jobs` migration, Node.js 24, Claude Code signed in
+(`claude`), and `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env`.
+
+1. Sign in once with your Pointage account. Only the Supabase session is kept,
+   in `~/.config/pointage/claude-agent/session.json` (readable by you only);
+   the password is not:
+
+   ```bash
+   pnpm claude-agent login
+   ```
+
+2. Fill `~/.config/pointage/claude-agent/config.json` (created at the first
+   run). A project is found by its name in Odoo, whatever the case, or by
+   `"<instance>:<project id>"`. A job for a project not listed is refused,
+   unless `defaultFolder` is set. Each folder must be a repository Claude Code
+   already trusts (run `claude` in it once).
+
+   ```json
+   {
+     "permissionMode": "acceptEdits",
+     "worktree": true,
+     "projects": {
+       "COGECI": "~/Documents/cogeci/addons"
+     },
+     "defaultFolder": null
+   }
+   ```
+
+   `permissionMode` is one of `acceptEdits`, `auto`, `default`, `dontAsk` or
+   `plan` (`bypassPermissions` is refused). With `worktree`, each session
+   works in its own git worktree (`pointage-<ref>-<id>`), leaving your
+   checkout alone.
+
+3. Run it, by hand or as a user service that starts with the computer:
+
+   ```bash
+   pnpm claude-agent
+   ```
+
+   ```ini
+   # ~/.config/systemd/user/pointage-claude-agent.service
+   [Unit]
+   Description=Pointage Claude agent
+   After=network-online.target
+
+   [Service]
+   WorkingDirectory=/path/to/pointage-etech
+   ExecStart=/usr/bin/node scripts/claudeAgent.ts
+   Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin
+   Restart=on-failure
+   RestartSec=10
+   # Sessions run in Claude Code's background service: stopping the agent
+   # must not stop them.
+   KillMode=process
+
+   [Install]
+   WantedBy=default.target
+   ```
+
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now pointage-claude-agent
+   journalctl --user -u pointage-claude-agent -f
+   ```
+
+The agent hears new jobs through Realtime, also reads the waiting ones every
+minute, and tells Pointage it is online at the same time: the dialog shows
+whether your computer is online. A job not taken within 10 minutes expires.
+For each job the agent runs, in the project's folder:
+
+```bash
+claude --bg --remote-control "<name>" --name "<name>" --permission-mode <mode> --worktree <worktree> -- "<instructions>"
+```
+
+`claude agents` lists the sessions, `claude attach <id>` opens one in a
+terminal, and `claude rm <id>` removes it with its worktree.
+
 ## Troubleshooting
 
 | Symptom                              | Check                                                                                     |

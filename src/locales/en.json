@@ -695,5 +695,42 @@
     "deleted": "Automatic entry deleted",
     "saved": "Automatic entry saved",
     "created": "Automatic entry created: it will be logged every working day"
+  },
+  "claudeTask": {
+    "button": "Do with Claude",
+    "title": "Do with Claude",
+    "folder": "Repository folder",
+    "folderPlaceholder": "~/projects/my-module",
+    "folderHint": "The local repository Claude will work in. Remembered for this project, on this computer only. Leave empty to pick it in Claude.",
+    "prompt": "Instructions for Claude",
+    "promptHint": "Editable. Claude Desktop opens a new Claude Code session with this text ready to send.",
+    "loadingDescription": "Loading the task description…",
+    "descriptionError": "Description not loaded ({{message}}): the instructions leave it out.",
+    "submit": "Open in Claude",
+    "opened": "Opening Claude Desktop",
+    "openedHint": "Nothing opens? Check that Claude Desktop is installed on this computer.",
+    "promptIntro": "Implement the Odoo task {{task}}.",
+    "promptProject": "Project: {{project}}",
+    "promptStage": "Stage: {{stage}}",
+    "promptLink": "Task in Odoo: {{url}}",
+    "promptDescription": "Task description:",
+    "promptOutro": "Follow the odoo-ticket-dev skill end to end.",
+    "remote": {
+      "submit": "Start on my computer",
+      "promptHint": "Editable. The Claude agent of your computer starts the session; follow it in the Claude app (Remote Control).",
+      "yourComputer": "your computer",
+      "lookingForAgent": "Looking for your computer…",
+      "agentError": "Can't reach your computer: {{message}}",
+      "noAgent": "No Claude agent is set up on a computer. See \"Claude agent\" in the README.",
+      "online": "{{host}} is online.",
+      "offline": "{{host}} has been offline since {{time}}. The request will wait 10 minutes for it.",
+      "sendError": "Request not sent: {{message}}",
+      "waiting": "Request sent, waiting for your computer…",
+      "launching": "Starting the session on {{host}}…",
+      "failed": "Failed on {{host}}: {{message}}",
+      "expired": "Your computer didn't pick the request up in time. Check that the agent runs, then try again.",
+      "started": "Session started on {{host}}",
+      "startedHint": "Follow \"{{name}}\" in the Claude app or on claude.ai/code."
+    }
   }
 }
