@@ -255,16 +255,20 @@ export function AttendanceCard({
             {error}
           </p>
         )}
-        {data?.map(
-          (result) =>
-            !result.ok && (
-              <InstanceErrorNotice
-                key={result.instanceIndex}
-                instanceIndex={result.instanceIndex}
-                message={result.error}
-              />
-            )
-        )}
+        {/* An instance that failed matters only when no other one answered:
+            time off and attendance usually live on a single instance, and a
+            down projects instance (PMO) mustn't alarm on this page. */}
+        {available.length === 0 &&
+          data?.map(
+            (result) =>
+              !result.ok && (
+                <InstanceErrorNotice
+                  key={result.instanceIndex}
+                  instanceIndex={result.instanceIndex}
+                  message={result.error}
+                />
+              )
+          )}
         {isLoading ? (
           <Skeleton className="h-16 w-full rounded-lg" />
         ) : data !== undefined && available.length === 0 ? (
