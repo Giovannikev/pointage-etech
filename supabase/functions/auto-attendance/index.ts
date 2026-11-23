@@ -214,26 +214,40 @@ function toOdooDatetime(date: Date): string {
 /* Odoo                                                                */
 /* ------------------------------------------------------------------ */
 
-/** The first instance with the Attendances app and an employee for the user. */
+/**
+ * The first instance with the Attendances app and an employee for the user.
+ *
+ * An instance that fails (unreachable, expired certificate, wrong password)
+ * is skipped: attendance often lives on another instance than the projects,
+ * and the down one mustn't stop the punches. Its error is raised only when
+ * no other instance qualifies, so a down attendance instance still reads as
+ * a failure (retried by the next runs) and not as "no Attendances".
+ */
 async function findAttendanceInstance(
   userId: string
 ): Promise<{ session: OdooSession; employeeId: number }> {
   const instances = (await loadSettings(userId)).odooInstances
   const getSession = createSessionPool(instances)
+  let failure: unknown = null
   for (const { index } of instances) {
-    const session = await getSession(index)
     try {
-      await executeKw(session, "hr.attendance", "fields_get", [], {
-        attributes: ["type"],
-      })
+      const session = await getSession(index)
+      try {
+        await executeKw(session, "hr.attendance", "fields_get", [], {
+          attributes: ["type"],
+        })
+      } catch (error) {
+        // "Object hr.attendance doesn't exist": the app isn't installed.
+        if (error instanceof OdooRpcError) continue
+        throw error
+      }
+      const employeeId = await readOwnEmployeeId(session)
+      if (employeeId !== null) return { session, employeeId }
     } catch (error) {
-      // "Object hr.attendance doesn't exist": the app isn't installed.
-      if (error instanceof OdooRpcError) continue
-      throw error
+      failure ??= error
     }
-    const employeeId = await readOwnEmployeeId(session)
-    if (employeeId !== null) return { session, employeeId }
   }
+  if (failure !== null) throw failure
   throw new HttpError("No Odoo instance with Attendances for this user.", 400)
 }
 
