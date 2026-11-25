@@ -110,7 +110,7 @@ export interface TimesheetEntry {
 
 /* ------------------------------------------------------------------ */
 /* odoo-gateway Edge Function contract                                 */
-/* Mirrored in supabase/functions/odoo-gateway/index.ts                */
+/* Mirrored in supabase/functions/odoo-gateway/contract.ts             */
 /* ------------------------------------------------------------------ */
 
 export interface SearchTaskRequest {
