@@ -59,17 +59,19 @@ jobs:
         run: echo "::warning::Add the SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_REF repository secrets to deploy the functions automatically."
       - uses: actions/checkout@v4
         if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
-      - uses: supabase/setup-cli@v1
+      # The CLI comes from npm: supabase/setup-cli looks up the latest release
+      # through the GitHub API, whose anonymous rate limit fails the job.
+      - uses: actions/setup-node@v4
         if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         with:
-          version: latest
+          node-version: 22
       - name: Deploy the functions called by the app (JWT verified)
         if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         run: >
-          supabase functions deploy user-settings github-commits odoo-gateway
+          npx --yes supabase@2 functions deploy user-settings github-commits odoo-gateway
           --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
       - name: Deploy auto-attendance (called by pg_cron with CRON_SECRET, no JWT)
         if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         run: >
-          supabase functions deploy auto-attendance
+          npx --yes supabase@2 functions deploy auto-attendance
           --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes --no-verify-jwt
