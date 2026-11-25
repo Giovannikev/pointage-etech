@@ -67,9 +67,9 @@ jobs:
         if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         run: >
           supabase functions deploy user-settings github-commits odoo-gateway
-          --project-ref "$SUPABASE_PROJECT_REF" --use-api
+          --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes
       - name: Deploy auto-attendance (called by pg_cron with CRON_SECRET, no JWT)
         if: env.SUPABASE_ACCESS_TOKEN != '' && env.SUPABASE_PROJECT_REF != ''
         run: >
           supabase functions deploy auto-attendance
-          --project-ref "$SUPABASE_PROJECT_REF" --use-api --no-verify-jwt
+          --project-ref "$SUPABASE_PROJECT_REF" --use-api --yes --no-verify-jwt
