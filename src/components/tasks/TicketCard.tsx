@@ -1,3 +1,4 @@
+import { memo } from "react"
 import {
   ExternalLinkIcon,
   LifeBuoyIcon,
@@ -31,7 +32,8 @@ interface TicketCardProps {
 }
 
 /** A helpdesk ticket, styled like the Kanban task cards. */
-export function TicketCard({
+/** Memoized like the task cards, so a board change doesn't redraw it. */
+export const TicketCard = memo(function TicketCard({
   ticket,
   showInstance,
   onLogTime,
@@ -142,4 +144,4 @@ export function TicketCard({
       </div>
     </article>
   )
-}
+})

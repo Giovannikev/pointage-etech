@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useDeferredValue, useMemo, useState } from "react"
 import {
   ArchiveIcon,
   Columns3Icon,
@@ -21,8 +14,7 @@ import { toast } from "sonner"
 
 import { AssigneeFilter } from "@/components/kanban/AssigneeFilter"
 import { ClaudeTaskDialog } from "@/components/kanban/ClaudeTaskDialog"
-import type { CardEditing } from "@/components/kanban/KanbanCard"
-import { KanbanColumn, type ColumnDrop } from "@/components/kanban/KanbanColumn"
+import { KanbanColumn } from "@/components/kanban/KanbanColumn"
 import { ProjectFilter } from "@/components/kanban/ProjectFilter"
 import {
   QuickLogDialog,
@@ -55,34 +47,18 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useOdooInstances } from "@/contexts/SettingsContext"
-import { useCachedQuery } from "@/hooks/useCachedQuery"
+import { useBoardQueries } from "@/hooks/useBoardQueries"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useDialogTarget } from "@/hooks/useDialogTarget"
 import { useFormatters } from "@/hooks/useFormatters"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useTaskDetails } from "@/hooks/useTaskDetails"
+import { useTaskEditing } from "@/hooks/useTaskEditing"
 import { useSyncViewParams } from "@/hooks/useViewParams"
 import { cn } from "@/lib/utils"
-import {
-  fetchAssignees,
-  fetchMyTasks,
-  fetchProjectsOf,
-  fetchTaskList,
-  peekAssignees,
-  peekMyTasks,
-  peekProjectsOf,
-  peekTaskList,
-  peekTickets,
-  searchTickets,
-  updateTask,
-  type ProjectsInstanceResult,
-  type TaskListFilters,
-} from "@/services/odooService"
+import type { TaskListFilters } from "@/services/odooService"
 import type {
-  AssigneesInstanceResult,
-  KanbanStage,
   KanbanTask,
-  KanbanTaskStatus,
   MyTasksInstanceResult,
   OdooTaskMatch,
   RecordFilters,
@@ -91,17 +67,11 @@ import type {
 import {
   buildBoard,
   countClosedTasks,
-  findColumnStage,
-  isClosedTask,
   isOpenBoardTask,
-  listMoveTargets,
   listProjects,
   listTickets,
-  moveToStage,
   replaceTask,
   statusOptionsOf,
-  taskKey,
-  type BoardColumn,
   type BoardGrouping,
 } from "@/utils/kanban"
 import {
@@ -156,19 +126,6 @@ function readInitialFilters(scope: TaskBoardScope) {
     showTickets: params.get("tickets") !== "0",
   }
 }
-
-const MY_TASKS_QUERY_KEY = "myTasks"
-/** Same key as the cached read of the user's open tickets. */
-const MY_TICKETS_QUERY_KEY = "tickets:mine:"
-
-/*
- * Each board calls every query hook, so their number never changes; the
- * ones its scope doesn't use read nothing and answer at once.
- */
-const IDLE_TASKS: MyTasksInstanceResult[] = []
-const IDLE_TICKETS: TicketsInstanceResult[] = []
-const IDLE_PROJECTS: ProjectsInstanceResult[] = []
-const IDLE_ASSIGNEES: AssigneesInstanceResult[] = []
 
 function BoardSkeleton() {
   const { t } = useTranslation()
@@ -275,62 +232,21 @@ export function TaskBoard({ scope }: TaskBoardProps) {
     serverQuery === "" &&
     recordFilters.projects.length === 0 &&
     recordFilters.assignees.length === 0
-  const filtersId = JSON.stringify(listFilters)
 
-  /* ---- Tasks ------------------------------------------------------- */
-
-  const tasksKey = !isAll
-    ? MY_TASKS_QUERY_KEY
-    : isIdle
-      ? "taskList:idle"
-      : `taskList:${filtersId}`
-  const tasksFetcher = useCallback(
-    ({ force }: { force: boolean }): Promise<MyTasksInstanceResult[]> => {
-      if (!isAll) return fetchMyTasks({ force })
-      if (isIdle) return Promise.resolve(IDLE_TASKS)
-      return fetchTaskList(listFilters, { force })
-    },
-    [isAll, isIdle, listFilters]
+  const instanceIndexes = useMemo(
+    () => instances.map((item) => item.index),
+    [instances]
   )
-  const tasksPeek = useCallback((): MyTasksInstanceResult[] | undefined => {
-    if (!isAll) return peekMyTasks()
-    if (isIdle) return IDLE_TASKS
-    return peekTaskList(listFilters)
-  }, [isAll, isIdle, listFilters])
-  const tasksQuery = useCachedQuery<MyTasksInstanceResult[]>(
-    tasksKey,
-    tasksFetcher,
-    tasksPeek
-  )
+  const { tasksQuery, ticketsQuery, projectsQuery, assigneesQuery } =
+    useBoardQueries({
+      isAll,
+      isIdle,
+      serverQuery,
+      recordFilters,
+      listFilters,
+      instanceIndexes,
+    })
   const { data } = tasksQuery
-
-  /* ---- Tickets ----------------------------------------------------- */
-
-  // My tasks: the user's open tickets. All tasks: the open tickets the
-  // filters select, read whether shown or not, to know if there are any.
-  const ticketsKey = !isAll
-    ? MY_TICKETS_QUERY_KEY
-    : isIdle
-      ? "tickets:idle"
-      : `tickets:filtered:${serverQuery}:${JSON.stringify(recordFilters)}`
-  const ticketsFetcher = useCallback(
-    ({ force }: { force: boolean }): Promise<TicketsInstanceResult[]> => {
-      if (!isAll) return searchTickets("", true, { force })
-      if (isIdle) return Promise.resolve(IDLE_TICKETS)
-      return searchTickets(serverQuery, false, { force }, recordFilters)
-    },
-    [isAll, isIdle, serverQuery, recordFilters]
-  )
-  const ticketsPeek = useCallback((): TicketsInstanceResult[] | undefined => {
-    if (!isAll) return peekTickets("", true)
-    if (isIdle) return IDLE_TICKETS
-    return peekTickets(serverQuery, false, recordFilters)
-  }, [isAll, isIdle, serverQuery, recordFilters])
-  const ticketsQuery = useCachedQuery<TicketsInstanceResult[]>(
-    ticketsKey,
-    ticketsFetcher,
-    ticketsPeek
-  )
   const ticketResults = ticketsQuery.data
   /** At least one instance has a helpdesk: the tickets toggle makes sense. */
   const hasHelpdesk = isAll
@@ -347,40 +263,6 @@ export function TaskBoard({ scope }: TaskBoardProps) {
 
   /* ---- Filter choices (All tasks) ---------------------------------- */
 
-  const instanceIndexes = useMemo(
-    () => instances.map((item) => item.index),
-    [instances]
-  )
-  const projectsFetcher = useCallback(
-    ({ force }: { force: boolean }) =>
-      isAll
-        ? fetchProjectsOf(instanceIndexes, { force })
-        : Promise.resolve(IDLE_PROJECTS),
-    [isAll, instanceIndexes]
-  )
-  const projectsPeek = useCallback(
-    () => (isAll ? peekProjectsOf(instanceIndexes) : IDLE_PROJECTS),
-    [isAll, instanceIndexes]
-  )
-  const projectsQuery = useCachedQuery<ProjectsInstanceResult[]>(
-    isAll ? `projectsOf:${instanceIndexes.join(",")}` : "projectsOf:idle",
-    projectsFetcher,
-    projectsPeek
-  )
-  const assigneesFetcher = useCallback(
-    ({ force }: { force: boolean }) =>
-      isAll ? fetchAssignees({ force }) : Promise.resolve(IDLE_ASSIGNEES),
-    [isAll]
-  )
-  const assigneesPeek = useCallback(
-    () => (isAll ? peekAssignees() : IDLE_ASSIGNEES),
-    [isAll]
-  )
-  const assigneesQuery = useCachedQuery<AssigneesInstanceResult[]>(
-    isAll ? "assignees" : "assignees:idle",
-    assigneesFetcher,
-    assigneesPeek
-  )
   const assigneeResults = assigneesQuery.data
   const assigneeOptions = useMemo(
     () =>
@@ -494,127 +376,13 @@ export function TaskBoard({ scope }: TaskBoardProps) {
   /* ---- Editing: stage (drag and drop, menu) and state (badge) ---- */
 
   const { mutate: mutateTasks } = tasksQuery
-  /** Tasks whose change is being saved in Odoo, by taskKey(). */
-  const [saving, setSaving] = useState<ReadonlySet<string>>(() => new Set())
-  /** The card being dragged, while it is. */
-  const [dragged, setDragged] = useState<KanbanTask | null>(null)
-
-  const setSavingFor = useCallback((key: string, isSaving: boolean): void => {
-    setSaving((current) => {
-      const next = new Set(current)
-      if (isSaving) next.add(key)
-      else next.delete(key)
-      return next
-    })
-  }, [])
-
-  /**
-   * Shows the change at once, saves it in Odoo, then shows the task as Odoo
-   * holds it (moving may reset its state); on failure, puts it back.
-   */
-  const saveTask = useCallback(
-    async (
-      before: KanbanTask,
-      optimistic: KanbanTask,
-      change: { stageId?: number; status?: KanbanTaskStatus }
-    ): Promise<KanbanTask> => {
-      const key = taskKey(before)
-      setSavingFor(key, true)
-      mutateTasks((results) => replaceTask(results, optimistic))
-      try {
-        const saved = await updateTask({
-          instanceIndex: before.instanceIndex,
-          taskId: before.taskId,
-          ...change,
-        })
-        mutateTasks((results) => replaceTask(results, saved))
-        return saved
-      } catch (error) {
-        mutateTasks((results) => replaceTask(results, before))
-        throw error
-      } finally {
-        setSavingFor(key, false)
-      }
-    },
-    [mutateTasks, setSavingFor]
-  )
-
-  /** The latest moveTask, for the "Undo" button of a move's notification. */
-  const moveTaskRef = useRef<
-    ((task: KanbanTask, stage: KanbanStage) => Promise<void>) | null
-  >(null)
-
-  const moveTask = useCallback(
-    async (task: KanbanTask, stage: KanbanStage): Promise<void> => {
-      const previous =
-        data === undefined
-          ? undefined
-          : listMoveTargets(data, moveToStage(task, stage)).find(
-              (candidate) => candidate.stageId === task.stageId
-            )
-      try {
-        const saved = await saveTask(task, moveToStage(task, stage), {
-          stageId: stage.stageId,
-        })
-        const isHidden = !showClosed && isClosedTask(saved, stage)
-        toast.success(t("kanban.moved", { stage: stage.name }), {
-          description: isHidden
-            ? `${task.name} — ${t("kanban.movedHidden")}`
-            : task.name,
-          action:
-            previous === undefined
-              ? undefined
-              : {
-                  label: t("kanban.undo"),
-                  onClick: () => void moveTaskRef.current?.(saved, previous),
-                },
-        })
-      } catch (error) {
-        toast.error(t("kanban.moveError"), {
-          description: error instanceof Error ? error.message : String(error),
-        })
-      }
-    },
-    [data, saveTask, showClosed, t]
-  )
-
-  useEffect(() => {
-    moveTaskRef.current = moveTask
-  }, [moveTask])
-
-  const changeStatus = useCallback(
-    async (task: KanbanTask, status: KanbanTaskStatus): Promise<void> => {
-      try {
-        const saved = await saveTask(task, { ...task, status }, { status })
-        const label = t(`kanban.status.${saved.status ?? "in_progress"}`)
-        toast.success(t("kanban.statusChanged", { status: label }), {
-          description: task.name,
-        })
-      } catch (error) {
-        toast.error(t("kanban.statusError"), {
-          description: error instanceof Error ? error.message : String(error),
-        })
-      }
-    },
-    [saveTask, t]
-  )
-
-  const cardEditing = useCallback(
-    (task: KanbanTask): CardEditing => ({
-      statusOptions: statusOptionsOf(data, task.instanceIndex),
-      getMoveTargets: (current) =>
-        data === undefined ? [] : listMoveTargets(data, current),
-      isSaving: saving.has(taskKey(task)),
-      // Dropping changes the stage: only columns that are stages accept it.
-      isDraggable: groupBy === "stage" && task.projectId !== null,
-      onChangeStatus: (current, status) => void changeStatus(current, status),
-      onMove: (current, stage) => void moveTask(current, stage),
-      onLogNote: taskNote.open,
-      onDragStart: setDragged,
-      onDragEnd: () => setDragged(null),
-    }),
-    [data, saving, groupBy, changeStatus, moveTask, taskNote.open]
-  )
+  const { cardEditing, columnDrop } = useTaskEditing({
+    data,
+    mutateTasks,
+    groupBy,
+    showClosed,
+    onLogNote: taskNote.open,
+  })
 
   /** Open tasks can be handed to a Claude Code session in Claude Desktop. */
   const claudeActionOf = useCallback(
@@ -634,21 +402,11 @@ export function TaskBoard({ scope }: TaskBoardProps) {
     [isAll, assigneeResults, assigneeNames]
   )
 
-  const columnDrop = (column: BoardColumn): ColumnDrop | undefined => {
-    if (dragged === null || data === undefined) return undefined
-    const draggedKey = taskKey(dragged)
-    return {
-      stage: findColumnStage(data, dragged, column.key),
-      isSource: column.cards.some(
-        (card) => card.kind === "task" && taskKey(card.task) === draggedKey
-      ),
-      onDrop: (stage) => {
-        const task = dragged
-        setDragged(null)
-        void moveTask(task, stage)
-      },
-    }
-  }
+  const { open: openTaskDetails } = taskDetails
+  const openTask = useCallback(
+    (task: KanbanTask) => openTaskDetails(toTaskMatch(task)),
+    [openTaskDetails]
+  )
 
   const handleNotePosted = (saved: KanbanTask, approved: boolean): void => {
     taskNote.close()
@@ -787,7 +545,7 @@ export function TaskBoard({ scope }: TaskBoardProps) {
               isCollapsed={column.folded !== toggled.has(column.key)}
               showInstance={instance === "all" && instances.length > 1}
               onToggleCollapsed={toggleColumn}
-              onOpenTask={(task) => taskDetails.open(toTaskMatch(task))}
+              onOpenTask={openTask}
               onLogTime={quickLog.open}
               cardEditing={cardEditing}
               drop={columnDrop(column)}

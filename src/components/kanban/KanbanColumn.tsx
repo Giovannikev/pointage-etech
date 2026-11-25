@@ -1,8 +1,19 @@
-import { useState, type DragEvent } from "react"
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type ComponentProps,
+  type DragEvent,
+} from "react"
 import { ChevronsLeftRightIcon, ChevronsRightLeftIcon } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { KanbanCard, type CardEditing } from "@/components/kanban/KanbanCard"
+import {
+  KanbanCard,
+  type CardEditing,
+  type CardEditingActions,
+  type CardEditingState,
+} from "@/components/kanban/KanbanCard"
 import { TicketCard } from "@/components/tasks/TicketCard"
 import {
   taskTarget,
@@ -13,7 +24,7 @@ import { Button } from "@/components/ui/button"
 import { useFormatters } from "@/hooks/useFormatters"
 import { INSTANCE_BACKGROUNDS } from "@/lib/instanceColors"
 import { cn } from "@/lib/utils"
-import type { KanbanStage, KanbanTask } from "@/types/timesheet"
+import type { HelpdeskTicket, KanbanStage, KanbanTask } from "@/types/timesheet"
 import { cardKey, type BoardColumn } from "@/utils/kanban"
 
 interface KanbanColumnProps {
@@ -25,7 +36,7 @@ interface KanbanColumnProps {
   /** Logs time on a task or a ticket of the column. */
   onLogTime: (target: LogTarget) => void
   /** Editing of the column's tasks; read only without it. */
-  cardEditing?: (task: KanbanTask) => CardEditing
+  cardEditing?: BoardCardEditing
   /** Set while a card is dragged over the board. */
   drop?: ColumnDrop
   /** Names the assignees on each task card (All tasks page). */
@@ -34,6 +45,14 @@ interface KanbanColumnProps {
   claudeActionOf?: (
     task: KanbanTask
   ) => ((task: KanbanTask) => void) | undefined
+}
+
+/** How the board lets its task cards be edited. */
+export interface BoardCardEditing {
+  /** Stable handlers, shared by every card. */
+  actions: CardEditingActions
+  /** The card's own state, read on every render. */
+  stateOf: (task: KanbanTask) => CardEditingState
 }
 
 /** What the dragged card would become in this column. */
@@ -88,6 +107,47 @@ function useDropZone(drop: ColumnDrop | undefined) {
   } as const
 }
 
+type TaskCardItemProps = Omit<
+  ComponentProps<typeof KanbanCard>,
+  "editing" | "assignees" | "onDoWithClaude"
+> &
+  Pick<KanbanColumnProps, "cardEditing" | "assigneesOf" | "claudeActionOf">
+
+/**
+ * Derives a card's per-task props so they keep their identity between board
+ * renders: the memoized card then only re-renders when they really change.
+ */
+function TaskCardItem({
+  task,
+  cardEditing,
+  assigneesOf,
+  claudeActionOf,
+  ...props
+}: TaskCardItemProps) {
+  const state = cardEditing?.stateOf(task)
+  const actions = cardEditing?.actions
+  const statusOptions = state?.statusOptions
+  const isSaving = state?.isSaving ?? false
+  const isDraggable = state?.isDraggable ?? false
+  const editing = useMemo(
+    (): CardEditing | undefined =>
+      actions === undefined || statusOptions === undefined
+        ? undefined
+        : { ...actions, statusOptions, isSaving, isDraggable },
+    [actions, statusOptions, isSaving, isDraggable]
+  )
+  const assignees = useMemo(() => assigneesOf?.(task), [assigneesOf, task])
+  return (
+    <KanbanCard
+      task={task}
+      editing={editing}
+      assignees={assignees}
+      onDoWithClaude={claudeActionOf?.(task)}
+      {...props}
+    />
+  )
+}
+
 export function KanbanColumn({
   column,
   isCollapsed,
@@ -113,6 +173,14 @@ export function KanbanColumn({
       ? t("kanban.projectFilter.noProject")
       : t("kanban.noStage"))
   const count = column.cards.length
+  const logTask = useCallback(
+    (task: KanbanTask) => onLogTime(taskTarget(task)),
+    [onLogTime]
+  )
+  const logTicket = useCallback(
+    (ticket: HelpdeskTicket) => onLogTime(ticketTarget(ticket)),
+    [onLogTime]
+  )
   const instanceDot = showInstance && column.instanceIndex !== null && (
     <span
       aria-hidden
@@ -189,21 +257,21 @@ export function KanbanColumn({
         {column.cards.map((card) => (
           <li key={cardKey(card)}>
             {card.kind === "task" ? (
-              <KanbanCard
+              <TaskCardItem
                 task={card.task}
                 showInstance={showInstance}
                 context={column.kind === "project" ? "stage" : "project"}
                 onOpenTask={onOpenTask}
-                onLogTime={(task) => onLogTime(taskTarget(task))}
-                editing={cardEditing?.(card.task)}
-                assignees={assigneesOf?.(card.task)}
-                onDoWithClaude={claudeActionOf?.(card.task)}
+                onLogTime={logTask}
+                cardEditing={cardEditing}
+                assigneesOf={assigneesOf}
+                claudeActionOf={claudeActionOf}
               />
             ) : (
               <TicketCard
                 ticket={card.ticket}
                 showInstance={showInstance}
-                onLogTime={(ticket) => onLogTime(ticketTarget(ticket))}
+                onLogTime={logTicket}
               />
             )}
           </li>

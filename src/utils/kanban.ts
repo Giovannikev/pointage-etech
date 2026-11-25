@@ -524,6 +524,9 @@ export function findColumnStage(
   )
 }
 
+/** Shared, so a card without options keeps the same array between renders. */
+const NO_STATUS_OPTIONS: KanbanTaskStatus[] = []
+
 /** The states a task of the instance can be set to. */
 export function statusOptionsOf(
   results: MyTasksInstanceResult[] | undefined,
@@ -532,7 +535,9 @@ export function statusOptionsOf(
   const result = results?.find(
     (candidate) => candidate.instanceIndex === instanceIndex
   )
-  return result !== undefined && result.ok ? result.statusOptions : []
+  return result !== undefined && result.ok
+    ? result.statusOptions
+    : NO_STATUS_OPTIONS
 }
 
 /** The results with this task replaced (matched by instance and id). */

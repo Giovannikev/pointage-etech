@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { memo, useState } from "react"
 import {
   BotIcon,
   CalendarClockIcon,
@@ -47,16 +47,20 @@ const INSTANCE_EDGES: Record<OdooInstanceIndex, string> = {
   2: "border-l-instance-2",
 }
 
-/** What the board lets the user change on a card, written to Odoo. */
-export interface CardEditing {
+/** The card's own editing state; it re-renders when one of them changes. */
+export interface CardEditingState {
   /** States the task's instance accepts. */
   statusOptions: KanbanTaskStatus[]
-  /** Stages of the task's project it can move to; read when the menu opens. */
-  getMoveTargets: (task: KanbanTask) => KanbanStage[]
   /** A change of this task is being saved: the card waits for Odoo. */
   isSaving: boolean
   /** The card can be dragged onto another stage column. */
   isDraggable: boolean
+}
+
+/** The board's editing handlers: stable, and acting on its latest state. */
+export interface CardEditingActions {
+  /** Stages of the task's project it can move to; read when the menu opens. */
+  getMoveTargets: (task: KanbanTask) => KanbanStage[]
   onChangeStatus: (task: KanbanTask, status: KanbanTaskStatus) => void
   onMove: (task: KanbanTask, stage: KanbanStage) => void
   /** Opens the dialog posting a note in the task's chatter. */
@@ -64,6 +68,9 @@ export interface CardEditing {
   onDragStart: (task: KanbanTask) => void
   onDragEnd: () => void
 }
+
+/** What the board lets the user change on a card, written to Odoo. */
+export type CardEditing = CardEditingState & CardEditingActions
 
 interface KanbanCardProps {
   task: KanbanTask
@@ -176,7 +183,11 @@ function TaskHours({ task }: { task: KanbanTask }) {
   )
 }
 
-export function KanbanCard({
+/**
+ * Memoized: a board holds hundreds of cards, and every prop the board passes
+ * keeps its identity until this card's own data changes.
+ */
+export const KanbanCard = memo(function KanbanCard({
   task,
   showInstance,
   context,
@@ -364,4 +375,4 @@ export function KanbanCard({
       </div>
     </article>
   )
-}
+})
