@@ -28,8 +28,19 @@ export async function loadSettings(userId: string): Promise<UserSettings> {
       500
     )
   }
-  const plainText = await decryptText(data.payload, userId)
-  return parseStoredSettings(JSON.parse(plainText))
+  const { plainText, sealedWithPrevious } = await decryptText(
+    data.payload,
+    userId
+  )
+  const settings = parseStoredSettings(JSON.parse(plainText))
+  if (sealedWithPrevious) {
+    // Key change in progress: seal it with the new key. A failure only
+    // means it is tried again on the next load.
+    await saveSettings(userId, settings).catch((error: unknown) =>
+      console.error(`settings: re-encryption failed for ${userId}:`, error)
+    )
+  }
+  return settings
 }
 
 export async function saveSettings(

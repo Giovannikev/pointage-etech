@@ -4,11 +4,18 @@
  * The key lives only in the Edge Functions secret CREDENTIALS_ENCRYPTION_KEY
  * (32 random bytes, base64). The user id is bound as additional data, so a
  * ciphertext copied into another user's row can't be decrypted.
+ *
+ * Changing the key: put the old one in CREDENTIALS_ENCRYPTION_KEY_PREVIOUS
+ * and the new one in CREDENTIALS_ENCRYPTION_KEY. Settings still sealed with
+ * the old key are read with it and sealed again with the new one the next
+ * time they are loaded (see settingsStore). Once every user has been seen,
+ * the previous key can be removed.
  */
-import { requireEnv } from "./env.ts"
+import { readEnv, requireEnv } from "./env.ts"
 import { HttpError } from "./errors.ts"
 
 const KEY_ENV = "CREDENTIALS_ENCRYPTION_KEY"
+const PREVIOUS_KEY_ENV = "CREDENTIALS_ENCRYPTION_KEY_PREVIOUS"
 const KEY_LENGTH = 32
 const IV_LENGTH = 12
 const FORMAT_VERSION = "v1"
@@ -47,11 +54,14 @@ function decodeKey(encoded: string): ReturnType<typeof fromBase64> | null {
   }
 }
 
-function importKey(): Promise<CryptoKey> {
-  const raw = decodeKey(requireEnv(KEY_ENV))
+function importKey(
+  name: string = KEY_ENV,
+  encoded: string = requireEnv(name)
+): Promise<CryptoKey> {
+  const raw = decodeKey(encoded)
   if (raw === null || raw.length !== KEY_LENGTH) {
     throw new HttpError(
-      `Server misconfigured: ${KEY_ENV} must be ${KEY_LENGTH} bytes encoded in base64.`,
+      `Server misconfigured: ${name} must be ${KEY_LENGTH} bytes encoded in base64.`,
       500
     )
   }
@@ -76,18 +86,12 @@ export async function encryptText(
   )
 }
 
-export async function decryptText(
-  payload: string,
+async function decryptWith(
+  key: CryptoKey,
+  iv: string,
+  cipher: string,
   associatedData: string
-): Promise<string> {
-  const [version, iv, cipher] = payload.split(".")
-  if (version !== FORMAT_VERSION || iv === undefined || cipher === undefined) {
-    throw new HttpError(
-      "Your stored settings are unreadable. Save them again.",
-      500
-    )
-  }
-  const key = await importKey()
+): Promise<string | null> {
   try {
     const plain = await crypto.subtle.decrypt(
       {
@@ -100,9 +104,49 @@ export async function decryptText(
     )
     return decoder.decode(plain)
   } catch {
+    return null
+  }
+}
+
+/**
+ * Decrypts with the current key, then with the previous one during a key
+ * change. `sealedWithPrevious` tells the caller to encrypt it again.
+ */
+export async function decryptText(
+  payload: string,
+  associatedData: string
+): Promise<{ plainText: string; sealedWithPrevious: boolean }> {
+  const [version, iv, cipher] = payload.split(".")
+  if (version !== FORMAT_VERSION || iv === undefined || cipher === undefined) {
     throw new HttpError(
-      "Your stored settings can't be decrypted. Save them again.",
+      "Your stored settings are unreadable. Save them again.",
       500
     )
   }
+  const current = await decryptWith(
+    await importKey(),
+    iv,
+    cipher,
+    associatedData
+  )
+  if (current !== null) {
+    return { plainText: current, sealedWithPrevious: false }
+  }
+  const previousKey = readEnv(PREVIOUS_KEY_ENV)
+  const previous =
+    previousKey === null
+      ? null
+      : await decryptWith(
+          await importKey(PREVIOUS_KEY_ENV, previousKey),
+          iv,
+          cipher,
+          associatedData
+        )
+  if (previous !== null) {
+    return { plainText: previous, sealedWithPrevious: true }
+  }
+  throw new HttpError(
+    "Your stored settings can't be decrypted. Save them again.",
+    500
+  )
 }
