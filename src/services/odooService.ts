@@ -1,3 +1,4 @@
+import i18n from "i18next"
 import {
   cacheKey,
   odooCache,
@@ -609,7 +610,7 @@ export async function logTime(
 ): Promise<number> {
   const [result] = await submitTimesheets([submission])
   if (result === undefined) {
-    throw new Error("Odoo didn't return a result for this line.")
+    throw new Error(i18n.t("errors.noOdooResult"))
   }
   if (!result.success) {
     throw new Error(result.error)

@@ -1,4 +1,9 @@
-import { invokeFunction } from "@/services/edgeFunctionClient"
+import i18n from "i18next"
+
+import {
+  InvalidResponseError,
+  invokeFunction,
+} from "@/services/edgeFunctionClient"
 import { getSupabaseClient } from "@/services/supabaseClient"
 import { isRecord } from "@/utils/guards"
 
@@ -85,7 +90,7 @@ async function requireUserId(): Promise<string> {
   const { data, error } = await getSupabaseClient().auth.getSession()
   const userId = data.session?.user.id
   if (error !== null || userId === undefined) {
-    throw new Error("Your session has expired. Sign in again.")
+    throw new Error(i18n.t("errors.sessionExpired"))
   }
   return userId
 }
@@ -120,7 +125,7 @@ export async function fetchAutoAttendance(): Promise<AutoAttendancePreferences |
     afternoonStart === null ||
     afternoonEnd === null
   ) {
-    throw new Error("The automatic attendance settings are unreadable.")
+    throw new Error(i18n.t("errors.autoAttendanceUnreadable"))
   }
   return {
     enabled: row.enabled,
@@ -171,7 +176,7 @@ function toPlan(value: unknown): AutoAttendancePlan {
     !Array.isArray(value.punches) ||
     !Array.isArray(value.timeOff)
   ) {
-    throw new Error(`${FUNCTION} returned an unexpected response.`)
+    throw new InvalidResponseError(FUNCTION)
   }
   return {
     instance: value.instance,
@@ -201,7 +206,7 @@ function toPlan(value: unknown): AutoAttendancePlan {
 export async function fetchAutoAttendancePlan(): Promise<AutoAttendancePlan | null> {
   const data = await invokeFunction(FUNCTION, { body: { action: "PLAN" } })
   if (!isRecord(data)) {
-    throw new Error(`${FUNCTION} returned an unexpected response.`)
+    throw new InvalidResponseError(FUNCTION)
   }
   return data.plan === null ? null : toPlan(data.plan)
 }

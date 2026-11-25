@@ -1,4 +1,14 @@
 {
+  "errors": {
+    "generic": "Une erreur est survenue.",
+    "network": "Le serveur de l'application est injoignable. Vérifiez votre connexion puis réessayez.",
+    "unexpectedResponse": "Le serveur a renvoyé une réponse inattendue ({{name}}).",
+    "sessionExpired": "Votre session a expiré. Reconnectez-vous.",
+    "autoAttendanceUnreadable": "Les réglages du pointage automatique sont illisibles.",
+    "noProject": "Cette tâche n'a pas de projet : on ne peut pas y pointer de temps.",
+    "noOdooResult": "Odoo n'a pas renvoyé de résultat pour cette ligne.",
+    "notInOdoo": "Cette ligne n'est pas dans Odoo."
+  },
   "common": {
     "cancel": "Annuler",
     "loading": "Chargement",

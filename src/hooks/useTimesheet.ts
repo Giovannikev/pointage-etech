@@ -1,3 +1,4 @@
+import i18n from "i18next"
 import { useCallback, useEffect, useMemo, useReducer, useState } from "react"
 
 import { logOnTarget, matchTarget } from "@/components/timesheet/logTarget"
@@ -489,7 +490,7 @@ function toSubmission(entry: SubmittableEntry): TimesheetSubmission {
 }
 
 function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Something went wrong."
+  return error instanceof Error ? error.message : i18n.t("errors.generic")
 }
 
 type TicketEntry = SubmittableEntry & { task: TicketMatch }
@@ -859,7 +860,7 @@ export function useTimesheet(userId: string): UseTimesheetResult {
         entry.task === null ||
         entry.odooTimesheetId === null
       ) {
-        throw new Error("This line isn't in Odoo.")
+        throw new Error(i18n.t("errors.notInOdoo"))
       }
       return {
         instanceIndex: entry.task.instanceIndex,

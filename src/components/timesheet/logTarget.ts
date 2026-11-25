@@ -1,3 +1,5 @@
+import i18n from "i18next"
+
 import { logTicketTime, logTime } from "@/services/odooService"
 import type {
   HelpdeskTicket,
@@ -93,9 +95,7 @@ export function logOnTarget(
     })
   }
   if (target.projectId === null) {
-    return Promise.reject(
-      new Error("This task has no project, so time can't be logged on it.")
-    )
+    return Promise.reject(new Error(i18n.t("errors.noProject")))
   }
   return logTime({
     clientId: crypto.randomUUID(),

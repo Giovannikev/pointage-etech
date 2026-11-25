@@ -1,4 +1,14 @@
 {
+  "errors": {
+    "generic": "Something went wrong.",
+    "network": "The app's server can't be reached. Check your connection and try again.",
+    "unexpectedResponse": "The server returned an unexpected response ({{name}}).",
+    "sessionExpired": "Your session has expired. Sign in again.",
+    "autoAttendanceUnreadable": "The automatic attendance settings are unreadable.",
+    "noProject": "This task has no project, so time can't be logged on it.",
+    "noOdooResult": "Odoo didn't return a result for this line.",
+    "notInOdoo": "This line isn't in Odoo."
+  },
   "common": {
     "cancel": "Cancel",
     "loading": "Loading",
