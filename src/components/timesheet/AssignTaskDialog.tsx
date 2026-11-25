@@ -1,13 +1,6 @@
+import { useId, useMemo, useState, type FormEvent } from "react"
+import type { TFunction } from "i18next"
 import {
-  useCallback,
-  useId,
-  useMemo,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react"
-import {
-  CheckIcon,
   FolderKanbanIcon,
   LifeBuoyIcon,
   Link2Icon,
@@ -17,6 +10,10 @@ import {
 import { useTranslation } from "react-i18next"
 
 import { TaskStatusBadge } from "@/components/kanban/TaskStatusBadge"
+import {
+  PickerList,
+  type PickerSource,
+} from "@/components/timesheet/PickerList"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -29,11 +26,8 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useOdooInstances } from "@/contexts/SettingsContext"
-import { useCachedQuery } from "@/hooks/useCachedQuery"
-import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { useFormatters } from "@/hooks/useFormatters"
 import { INSTANCE_BACKGROUNDS } from "@/lib/instanceColors"
 import { cn } from "@/lib/utils"
@@ -51,6 +45,7 @@ import type {
   ListProjectsResponse,
   ListProjectTasksResponse,
   OdooInstanceIndex,
+  OdooProject,
   OdooTaskMatch,
   TicketsInstanceResult,
   TimesheetEntry,
@@ -123,418 +118,221 @@ function SearchField({
   )
 }
 
-function ListSkeleton() {
-  const { t } = useTranslation()
-  return (
-    <div className="grid gap-1.5 p-1" aria-label={t("common.loading")}>
-      {[0, 1, 2, 3].map((row) => (
-        <Skeleton key={row} className="h-8 w-full" />
-      ))}
-    </div>
-  )
-}
-
-function ListError({
-  message,
-  onRetry,
-}: {
-  message: string | null
-  onRetry: () => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <div className="grid justify-items-start gap-2 p-3 text-sm" role="alert">
-      <p className="text-destructive">{message}</p>
-      <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-        {t("common.tryAgain")}
-      </Button>
-    </div>
-  )
-}
-
-/** A selectable row of the project and task lists. */
-function OptionRow({
-  isSelected,
-  onSelect,
-  disabled = false,
-  children,
-}: {
-  isSelected: boolean
-  onSelect: () => void
-  disabled?: boolean
-  children: ReactNode
-}) {
-  return (
-    <li>
-      <button
-        type="button"
-        aria-pressed={isSelected}
-        disabled={disabled}
-        className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent",
-          isSelected && "bg-muted font-medium"
-        )}
-        onClick={onSelect}
-      >
-        <span
-          aria-hidden
-          className="flex size-4 shrink-0 items-center justify-center"
-        >
-          {isSelected && <CheckIcon className="size-4 text-primary" />}
-        </span>
-        {children}
-      </button>
-    </li>
-  )
-}
-
-function ProjectList({
-  instanceIndex,
-  search,
-  listId,
-  onSelect,
-}: {
-  instanceIndex: OdooInstanceIndex
-  search: string
-  listId: string
-  onSelect: (project: PickedProject) => void
-}) {
-  const { t } = useTranslation()
-  const fetcher = useCallback(
-    ({ force }: { force: boolean }) => fetchProjects(instanceIndex, { force }),
-    [instanceIndex]
-  )
-  const peek = useCallback(() => peekProjects(instanceIndex), [instanceIndex])
-  const query = useCachedQuery<ListProjectsResponse>(
-    `projects:${instanceIndex}`,
-    fetcher,
-    peek
-  )
-  const visible = useMemo(
-    () =>
-      (query.data?.projects ?? []).filter((project) =>
+/** Projects of the instance that accept timesheets, filtered as typed. */
+function projectPicker(
+  instanceIndex: OdooInstanceIndex,
+  t: TFunction
+): PickerSource<ListProjectsResponse, OdooProject> {
+  return {
+    label: t("assignTask.project"),
+    maxHeightClass: "max-h-56",
+    // Every project is read at once: the search never goes to Odoo.
+    serverQuery: () => "",
+    read: () => ({
+      key: `projects:${instanceIndex}`,
+      fetch: (options) => fetchProjects(instanceIndex, options),
+      peek: () => peekProjects(instanceIndex),
+    }),
+    view: (data, search) => ({
+      status: "list",
+      items: data.projects.filter((project) =>
         matchesWords(`${project.name} ${project.partnerName ?? ""}`, search)
       ),
-    [query.data, search]
-  )
-
-  if (query.isLoading) return <ListSkeleton />
-  if (query.data === undefined) {
-    return <ListError message={query.error} onRetry={query.refresh} />
-  }
-
-  return (
-    <>
-      <ul
-        id={listId}
-        aria-label={t("assignTask.project")}
-        className="grid max-h-56 overflow-y-auto rounded-lg border p-1"
-      >
-        {visible.map((project) => (
-          <OptionRow
-            key={project.projectId}
-            isSelected={false}
-            onSelect={() => onSelect(project)}
-          >
-            <span className="min-w-0 flex-1 truncate" title={project.name}>
-              {project.name}
-            </span>
-            {project.partnerName !== null && (
-              <span className="max-w-40 shrink-0 truncate text-xs text-muted-foreground">
-                {project.partnerName}
-              </span>
-            )}
-          </OptionRow>
-        ))}
-        {visible.length === 0 && (
-          <li className="px-2 py-6 text-center text-sm text-muted-foreground">
-            {query.data.projects.length === 0
-              ? t("assignTask.noProjects")
-              : t("assignTask.noProjectMatch")}
-          </li>
-        )}
-      </ul>
-      {query.data.truncated && (
-        <p className="text-xs text-muted-foreground">
-          {t("assignTask.projectsTruncated")}
-        </p>
-      )}
-    </>
-  )
-}
-
-function TaskList({
-  instanceIndex,
-  projectId,
-  search,
-  listId,
-  selectedTaskId,
-  onSelect,
-}: {
-  instanceIndex: OdooInstanceIndex
-  projectId: number
-  search: string
-  listId: string
-  selectedTaskId: number | null
-  onSelect: (task: KanbanTask) => void
-}) {
-  const { t } = useTranslation()
-  const debouncedSearch = useDebouncedValue(search.trim(), 350)
-  // Small projects are filtered here as the user types. When the project has
-  // more tasks than one read returns, the search also runs in Odoo.
-  const isLargeProject =
-    peekProjectTasks(instanceIndex, projectId, "")?.truncated === true
-  const serverQuery =
-    isLargeProject && debouncedSearch.length >= MIN_QUERY_LENGTH
-      ? debouncedSearch
-      : ""
-  const fetcher = useCallback(
-    ({ force }: { force: boolean }) =>
-      fetchProjectTasks(instanceIndex, projectId, serverQuery, { force }),
-    [instanceIndex, projectId, serverQuery]
-  )
-  const peek = useCallback(
-    () => peekProjectTasks(instanceIndex, projectId, serverQuery),
-    [instanceIndex, projectId, serverQuery]
-  )
-  const query = useCachedQuery<ListProjectTasksResponse>(
-    `projectTasks:${instanceIndex}:${projectId}:${serverQuery}`,
-    fetcher,
-    peek
-  )
-  const visible = useMemo(() => {
-    const tasks = (query.data?.tasks ?? []).filter((task) =>
-      matchesWords(`${task.name} #${task.taskId}`, search)
-    )
-    // Open tasks first; Odoo's order (priority, then latest) is kept otherwise.
-    return [
-      ...tasks.filter((task) => !isClosed(task)),
-      ...tasks.filter(isClosed),
-    ]
-  }, [query.data, search])
-
-  if (query.isLoading) return <ListSkeleton />
-  if (query.data === undefined) {
-    return <ListError message={query.error} onRetry={query.refresh} />
-  }
-
-  return (
-    <>
-      <ul
-        id={listId}
-        aria-label={t("assignTask.task")}
-        className="grid max-h-64 overflow-y-auto rounded-lg border p-1"
-      >
-        {visible.map((task) => {
-          const { ref, title } = splitTaskName(task.name)
-          return (
-            <OptionRow
-              key={task.taskId}
-              isSelected={task.taskId === selectedTaskId}
-              onSelect={() => onSelect(task)}
-            >
-              <span className="grid min-w-0 flex-1 gap-0.5">
-                <span className="truncate" title={task.name}>
-                  {ref !== null && (
-                    <span className="mr-1.5 font-mono text-xs text-muted-foreground">
-                      [{ref}]
-                    </span>
-                  )}
-                  {title}
-                </span>
-                {(task.stageName !== null ||
-                  (task.status !== null && task.status !== "in_progress")) && (
-                  <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                    {task.stageName !== null && (
-                      <span className="truncate">{task.stageName}</span>
-                    )}
-                    <TaskStatusBadge status={task.status} />
-                  </span>
-                )}
-              </span>
-            </OptionRow>
-          )
-        })}
-        {visible.length === 0 && (
-          <li className="px-2 py-6 text-center text-sm text-muted-foreground">
-            {query.data.tasks.length === 0 && serverQuery === ""
-              ? t("assignTask.noTasks")
-              : t("assignTask.noTaskMatch")}
-          </li>
-        )}
-      </ul>
-      {query.data.truncated && (
-        <p className="text-xs text-muted-foreground">
-          {t("assignTask.tasksTruncated")}
-        </p>
-      )}
-    </>
-  )
-}
-
-/** Tickets of one instance among the results of every instance. */
-function instanceTickets(
-  results: TicketsInstanceResult[] | undefined,
-  instanceIndex: OdooInstanceIndex
-): TicketsInstanceResult | undefined {
-  return results?.find((result) => result.instanceIndex === instanceIndex)
-}
-
-function TicketRow({
-  ticket,
-  isSelected,
-  onSelect,
-}: {
-  ticket: HelpdeskTicket
-  isSelected: boolean
-  onSelect: (ticket: HelpdeskTicket) => void
-}) {
-  const { t } = useTranslation()
-  const { formatHours } = useFormatters()
-  const team = ticket.teamName ?? ticket.projectName
-  return (
-    <OptionRow
-      isSelected={isSelected}
-      disabled={!ticket.loggable}
-      onSelect={() => onSelect(ticket)}
-    >
-      <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0 font-mono text-xs text-muted-foreground">
-            {ticketLabel(ticket)}
-          </span>
-          {ticket.priority > 0 && (
-            <StarIcon
-              className="size-3 shrink-0 fill-warning text-warning"
-              aria-label={t("kanban.starred")}
-            />
-          )}
-          <span className="truncate" title={ticket.name}>
-            {ticket.name}
-          </span>
+      emptyMessage:
+        data.projects.length === 0
+          ? t("assignTask.noProjects")
+          : t("assignTask.noProjectMatch"),
+      note: data.truncated ? t("assignTask.projectsTruncated") : null,
+    }),
+    getKey: (project) => project.projectId,
+    renderItem: (project) => (
+      <>
+        <span className="min-w-0 flex-1 truncate" title={project.name}>
+          {project.name}
         </span>
-        <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
-          {ticket.stageName !== null && (
-            <span className="shrink-0 rounded-sm bg-muted px-1 leading-4">
-              {ticket.stageName}
-            </span>
-          )}
-          {team !== null && <span className="truncate">{team}</span>}
-          {ticket.projectName !== null &&
-            ticket.teamName !== null &&
-            ticket.projectName !== ticket.teamName && (
-              <span className="truncate">{ticket.projectName}</span>
-            )}
-          {ticket.hoursSpent !== null && ticket.hoursSpent > 0 && (
-            <span className="ml-auto shrink-0 tabular-nums">
-              {formatHours(ticket.hoursSpent)}
-            </span>
-          )}
-        </span>
-        {!ticket.loggable && (
-          <span className="text-xs font-normal text-muted-foreground">
-            {t("assignTask.ticketNotLoggable")}
+        {project.partnerName !== null && (
+          <span className="max-w-40 shrink-0 truncate text-xs text-muted-foreground">
+            {project.partnerName}
           </span>
         )}
-      </span>
-    </OptionRow>
-  )
+      </>
+    ),
+  }
+}
+
+/** Active tasks of the project, assigned to anyone. */
+function taskPicker(
+  instanceIndex: OdooInstanceIndex,
+  projectId: number,
+  t: TFunction
+): PickerSource<ListProjectTasksResponse, KanbanTask> {
+  return {
+    label: t("assignTask.task"),
+    maxHeightClass: "max-h-64",
+    // Small projects are filtered here as the user types. When the project
+    // has more tasks than one read returns, the search also runs in Odoo.
+    serverQuery: (typed) =>
+      peekProjectTasks(instanceIndex, projectId, "")?.truncated === true &&
+      typed.length >= MIN_QUERY_LENGTH
+        ? typed
+        : "",
+    read: (serverQuery) => ({
+      key: `projectTasks:${instanceIndex}:${projectId}:${serverQuery}`,
+      fetch: (options) =>
+        fetchProjectTasks(instanceIndex, projectId, serverQuery, options),
+      peek: () => peekProjectTasks(instanceIndex, projectId, serverQuery),
+    }),
+    view: (data, search, serverQuery) => {
+      const tasks = data.tasks.filter((task) =>
+        matchesWords(`${task.name} #${task.taskId}`, search)
+      )
+      return {
+        status: "list",
+        // Open tasks first; Odoo's order (priority, then latest) is kept otherwise.
+        items: [
+          ...tasks.filter((task) => !isClosed(task)),
+          ...tasks.filter(isClosed),
+        ],
+        emptyMessage:
+          data.tasks.length === 0 && serverQuery === ""
+            ? t("assignTask.noTasks")
+            : t("assignTask.noTaskMatch"),
+        note: data.truncated ? t("assignTask.tasksTruncated") : null,
+      }
+    },
+    getKey: (task) => task.taskId,
+    renderItem: (task) => <TaskOption task={task} />,
+  }
 }
 
 /**
  * The user's open tickets of the instance, or, from 2 characters typed,
  * every open ticket matching the search (title, reference or #id).
  */
-function TicketList({
-  instanceIndex,
-  search,
-  listId,
-  selectedTicketId,
-  onSelect,
-}: {
-  instanceIndex: OdooInstanceIndex
-  search: string
-  listId: string
-  selectedTicketId: number | null
-  onSelect: (ticket: HelpdeskTicket) => void
-}) {
-  const { t } = useTranslation()
-  const debouncedSearch = useDebouncedValue(search.trim(), 350)
-  const serverQuery =
-    debouncedSearch.length >= MIN_QUERY_LENGTH ? debouncedSearch : ""
-  const mine = serverQuery === ""
-  const fetcher = useCallback(
-    ({ force }: { force: boolean }) =>
-      searchTickets(serverQuery, mine, { force }),
-    [serverQuery, mine]
-  )
-  const peek = useCallback(
-    () => peekTickets(serverQuery, mine),
-    [serverQuery, mine]
-  )
-  const query = useCachedQuery<TicketsInstanceResult[]>(
-    `pickerTickets:${mine ? "mine" : "all"}:${serverQuery}`,
-    fetcher,
-    peek
-  )
-  const result = instanceTickets(query.data, instanceIndex)
-  const visible = useMemo(() => {
-    if (result === undefined || !result.ok) return []
-    // The user's own tickets are filtered here as they type; a search in
-    // Odoo already matched its results.
-    const tickets = mine
-      ? result.tickets.filter((ticket) => matchesTicketSearch(ticket, search))
-      : result.tickets
-    // Tickets time can be logged on first; Odoo's order is kept otherwise.
-    return [
-      ...tickets.filter((ticket) => ticket.loggable),
-      ...tickets.filter((ticket) => !ticket.loggable),
-    ]
-  }, [result, mine, search])
+function ticketPicker(
+  instanceIndex: OdooInstanceIndex,
+  t: TFunction
+): PickerSource<TicketsInstanceResult[], HelpdeskTicket> {
+  return {
+    label: t("assignTask.ticket"),
+    maxHeightClass: "max-h-72",
+    serverQuery: (typed) => (typed.length >= MIN_QUERY_LENGTH ? typed : ""),
+    read: (serverQuery) => {
+      const mine = serverQuery === ""
+      return {
+        key: `pickerTickets:${mine ? "mine" : "all"}:${serverQuery}`,
+        fetch: (options) => searchTickets(serverQuery, mine, options),
+        peek: () => peekTickets(serverQuery, mine),
+      }
+    },
+    view: (data, search, serverQuery) => {
+      const result = data.find((item) => item.instanceIndex === instanceIndex)
+      if (result !== undefined && !result.ok) {
+        return { status: "error", message: result.error }
+      }
+      if (result === undefined || !result.available) {
+        return { status: "message", message: t("assignTask.noHelpdesk") }
+      }
+      const mine = serverQuery === ""
+      // The user's own tickets are filtered here as they type; a search in
+      // Odoo already matched its results.
+      const tickets = mine
+        ? result.tickets.filter((ticket) => matchesTicketSearch(ticket, search))
+        : result.tickets
+      const hint = mine
+        ? t("assignTask.myTicketsHint")
+        : t("assignTask.allTicketsHint")
+      return {
+        status: "list",
+        // Tickets time can be logged on first; Odoo's order is kept otherwise.
+        items: [
+          ...tickets.filter((ticket) => ticket.loggable),
+          ...tickets.filter((ticket) => !ticket.loggable),
+        ],
+        emptyMessage:
+          mine && search.trim() === ""
+            ? t("assignTask.noTickets")
+            : t("assignTask.noTicketMatch"),
+        note: result.truncated
+          ? `${hint} ${t("assignTask.ticketsTruncated")}`
+          : hint,
+      }
+    },
+    getKey: (ticket) => ticket.ticketId,
+    isDisabled: (ticket) => !ticket.loggable,
+    renderItem: (ticket) => <TicketOption ticket={ticket} />,
+  }
+}
 
-  if (query.isLoading) return <ListSkeleton />
-  if (query.data === undefined) {
-    return <ListError message={query.error} onRetry={query.refresh} />
-  }
-  if (result !== undefined && !result.ok) {
-    return <ListError message={result.error} onRetry={query.refresh} />
-  }
-  if (result === undefined || !result.available) {
-    return (
-      <p className="rounded-lg border px-3 py-6 text-center text-sm text-muted-foreground">
-        {t("assignTask.noHelpdesk")}
-      </p>
-    )
-  }
-
+function TaskOption({ task }: { task: KanbanTask }) {
+  const { ref, title } = splitTaskName(task.name)
   return (
-    <>
-      <ul
-        id={listId}
-        aria-label={t("assignTask.ticket")}
-        className="grid max-h-72 overflow-y-auto rounded-lg border p-1"
-      >
-        {visible.map((ticket) => (
-          <TicketRow
-            key={ticket.ticketId}
-            ticket={ticket}
-            isSelected={ticket.ticketId === selectedTicketId}
-            onSelect={onSelect}
-          />
-        ))}
-        {visible.length === 0 && (
-          <li className="px-2 py-6 text-center text-sm text-muted-foreground">
-            {mine && search.trim() === ""
-              ? t("assignTask.noTickets")
-              : t("assignTask.noTicketMatch")}
-          </li>
+    <span className="grid min-w-0 flex-1 gap-0.5">
+      <span className="truncate" title={task.name}>
+        {ref !== null && (
+          <span className="mr-1.5 font-mono text-xs text-muted-foreground">
+            [{ref}]
+          </span>
         )}
-      </ul>
-      <p className="text-xs text-muted-foreground">
-        {mine ? t("assignTask.myTicketsHint") : t("assignTask.allTicketsHint")}
-        {result.truncated && ` ${t("assignTask.ticketsTruncated")}`}
-      </p>
-    </>
+        {title}
+      </span>
+      {(task.stageName !== null ||
+        (task.status !== null && task.status !== "in_progress")) && (
+        <span className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+          {task.stageName !== null && (
+            <span className="truncate">{task.stageName}</span>
+          )}
+          <TaskStatusBadge status={task.status} />
+        </span>
+      )}
+    </span>
+  )
+}
+
+function TicketOption({ ticket }: { ticket: HelpdeskTicket }) {
+  const { t } = useTranslation()
+  const { formatHours } = useFormatters()
+  const team = ticket.teamName ?? ticket.projectName
+  return (
+    <span className="grid min-w-0 flex-1 gap-0.5">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+          {ticketLabel(ticket)}
+        </span>
+        {ticket.priority > 0 && (
+          <StarIcon
+            className="size-3 shrink-0 fill-warning text-warning"
+            aria-label={t("kanban.starred")}
+          />
+        )}
+        <span className="truncate" title={ticket.name}>
+          {ticket.name}
+        </span>
+      </span>
+      <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-muted-foreground">
+        {ticket.stageName !== null && (
+          <span className="shrink-0 rounded-sm bg-muted px-1 leading-4">
+            {ticket.stageName}
+          </span>
+        )}
+        {team !== null && <span className="truncate">{team}</span>}
+        {ticket.projectName !== null &&
+          ticket.teamName !== null &&
+          ticket.projectName !== ticket.teamName && (
+            <span className="truncate">{ticket.projectName}</span>
+          )}
+        {ticket.hoursSpent !== null && ticket.hoursSpent > 0 && (
+          <span className="ml-auto shrink-0 tabular-nums">
+            {formatHours(ticket.hoursSpent)}
+          </span>
+        )}
+      </span>
+      {!ticket.loggable && (
+        <span className="text-xs font-normal text-muted-foreground">
+          {t("assignTask.ticketNotLoggable")}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -576,6 +374,21 @@ function AssignTaskForm({
   const [taskSearch, setTaskSearch] = useState("")
   const [ticketSearch, setTicketSearch] = useState("")
   const [applyToOthers, setApplyToOthers] = useState(true)
+  const projectId = project?.projectId ?? null
+
+  // Memoized: a new source makes the list read again.
+  const projectSource = useMemo(
+    () => projectPicker(instanceIndex, t),
+    [instanceIndex, t]
+  )
+  const taskSource = useMemo(
+    () => (projectId === null ? null : taskPicker(instanceIndex, projectId, t)),
+    [instanceIndex, projectId, t]
+  )
+  const ticketSource = useMemo(
+    () => ticketPicker(instanceIndex, t),
+    [instanceIndex, t]
+  )
 
   const changeInstance = (next: OdooInstanceIndex): void => {
     if (next === instanceIndex) return
@@ -740,11 +553,11 @@ function AssignTaskForm({
               controls={`${fieldId}-tickets`}
               autoFocus
             />
-            <TicketList
-              instanceIndex={instanceIndex}
+            <PickerList
+              source={ticketSource}
               search={ticketSearch}
               listId={`${fieldId}-tickets`}
-              selectedTicketId={selectedTicketId}
+              selectedKey={selectedTicketId}
               onSelect={selectTicket}
             />
           </div>
@@ -767,10 +580,11 @@ function AssignTaskForm({
                 controls={`${fieldId}-projects`}
                 autoFocus
               />
-              <ProjectList
-                instanceIndex={instanceIndex}
+              <PickerList
+                source={projectSource}
                 search={projectSearch}
                 listId={`${fieldId}-projects`}
+                selectedKey={null}
                 onSelect={changeProject}
               />
             </div>
@@ -801,7 +615,7 @@ function AssignTaskForm({
         </div>
       )}
 
-      {kind === "task" && project !== null && (
+      {kind === "task" && taskSource !== null && (
         <div className="grid gap-2">
           <Label id={`${fieldId}-task`}>{t("assignTask.task")}</Label>
           <div
@@ -816,12 +630,11 @@ function AssignTaskForm({
               controls={`${fieldId}-tasks`}
               autoFocus
             />
-            <TaskList
-              instanceIndex={instanceIndex}
-              projectId={project.projectId}
+            <PickerList
+              source={taskSource}
               search={taskSearch}
               listId={`${fieldId}-tasks`}
-              selectedTaskId={
+              selectedKey={
                 task !== null &&
                 !isTicketMatch(task) &&
                 task.instanceIndex === instanceIndex

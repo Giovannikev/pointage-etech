@@ -116,3 +116,17 @@ export function useCachedQuery<T>(
     mutate,
   }
 }
+
+/** What a cached query reads: its key, and how to fetch or peek it. */
+export interface CachedQuerySource<T> {
+  key: string
+  fetch: (options: { force: boolean }) => Promise<T>
+  peek: () => T | undefined
+}
+
+/** useCachedQuery over a source, which must be memoized for its key. */
+export function useSourceQuery<T>(
+  source: CachedQuerySource<T>
+): CachedQueryResult<T> {
+  return useCachedQuery(source.key, source.fetch, source.peek)
+}

@@ -1,6 +1,10 @@
 import { useMemo } from "react"
 
-import { useCachedQuery, type CachedQueryResult } from "@/hooks/useCachedQuery"
+import {
+  useSourceQuery,
+  type CachedQueryResult,
+  type CachedQuerySource as QuerySource,
+} from "@/hooks/useCachedQuery"
 import {
   fetchAssignees,
   fetchMyTasks,
@@ -23,21 +27,9 @@ import type {
   TicketsInstanceResult,
 } from "@/types/timesheet"
 
-/** What a board query reads: its key, and how to fetch or peek it. */
-interface QuerySource<T> {
-  key: string
-  fetch: (options: { force: boolean }) => Promise<T>
-  peek: () => T | undefined
-}
-
 /** A query the board's scope doesn't use: reads nothing, answers at once. */
 function idleSource<T>(key: string, value: T): QuerySource<T> {
   return { key, fetch: () => Promise.resolve(value), peek: () => value }
-}
-
-/** The source must be memoized: its fetcher identity triggers a load. */
-function useSourceQuery<T>(source: QuerySource<T>): CachedQueryResult<T> {
-  return useCachedQuery(source.key, source.fetch, source.peek)
 }
 
 const MY_TASKS_QUERY_KEY = "myTasks"
