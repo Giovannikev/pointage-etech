@@ -549,7 +549,7 @@ async function submitLines(
   const ticketLines = entries.filter(isTicketEntry)
   const taskLines = entries.filter((entry) => !isTicketEntry(entry))
   if (ticketLines.length === 0) {
-    // Unchanged path: a failing batch rejects and the caller reports it.
+    // A failing batch marks its own lines failed, see submitTimesheets.
     return submitTimesheets(taskLines.map(toSubmission))
   }
   const [taskResults, ticketResults] = await Promise.all([

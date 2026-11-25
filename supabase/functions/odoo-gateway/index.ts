@@ -1182,25 +1182,47 @@ async function searchTasks(
 /* SUBMIT_TIMESHEET                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Creates a timesheet line, or returns the identical one the user already
+ * has (same day, task or ticket, hours and description).
+ *
+ * This makes a retry safe: when a request timed out or its answer was lost
+ * after Odoo had created the line, sending it again finds that line instead
+ * of logging the time twice.
+ */
+async function createTimesheetLine(
+  session: OdooSession,
+  values: Record<string, string | number>
+): Promise<unknown> {
+  const domain = [
+    ["user_id", "=", session.uid],
+    ...Object.entries(values).map(([field, value]) => [field, "=", value]),
+  ]
+  const existing = await executeKw(
+    session,
+    "account.analytic.line",
+    "search",
+    [domain],
+    { limit: 1 }
+  )
+  if (Array.isArray(existing) && isPositiveInteger(existing[0])) {
+    return existing[0]
+  }
+  return executeKw(session, "account.analytic.line", "create", [values])
+}
+
 async function createTimesheet(
   session: OdooSession,
   entry: TimesheetSubmission
 ): Promise<SubmissionResult> {
   try {
-    const timesheetId = await executeKw(
-      session,
-      "account.analytic.line",
-      "create",
-      [
-        {
-          name: entry.description,
-          project_id: entry.projectId,
-          task_id: entry.taskId,
-          unit_amount: entry.hours,
-          date: entry.date,
-        },
-      ]
-    )
+    const timesheetId = await createTimesheetLine(session, {
+      name: entry.description,
+      project_id: entry.projectId,
+      task_id: entry.taskId,
+      unit_amount: entry.hours,
+      date: entry.date,
+    })
     if (!isPositiveInteger(timesheetId)) {
       return {
         clientId: entry.clientId,
@@ -1210,10 +1232,11 @@ async function createTimesheet(
     }
     return { clientId: entry.clientId, success: true, timesheetId }
   } catch (error) {
-    if (error instanceof OdooRpcError) {
-      return { clientId: entry.clientId, success: false, error: error.message }
-    }
-    throw error
+    // Any failure (Odoo error, timeout, unreachable) stays on its line, so
+    // the lines already created keep their result. A retry is safe: see
+    // createTimesheetLine.
+    const message = error instanceof Error ? error.message : String(error)
+    return { clientId: entry.clientId, success: false, error: message }
   }
 }
 
@@ -2246,16 +2269,14 @@ async function logTicketTime(
   const task =
     support.hasTask && isRecord(record) ? readMany2one(record.task_id) : null
   const timesheetId = await asConflict(
-    executeKw(session, "account.analytic.line", "create", [
-      {
-        name: entry.description,
-        project_id: ticket.projectId,
-        [support.lineLink]: entry.ticketId,
-        ...(task === null ? {} : { task_id: task.id }),
-        unit_amount: entry.hours,
-        date: entry.date,
-      },
-    ])
+    createTimesheetLine(session, {
+      name: entry.description,
+      project_id: ticket.projectId,
+      [support.lineLink]: entry.ticketId,
+      ...(task === null ? {} : { task_id: task.id }),
+      unit_amount: entry.hours,
+      date: entry.date,
+    })
   )
   if (!isPositiveInteger(timesheetId)) {
     throw new HttpError("Odoo didn't return the new timesheet id.", 502)

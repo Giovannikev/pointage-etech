@@ -165,11 +165,23 @@ export async function submitTimesheets(
   entries: TimesheetSubmission[]
 ): Promise<SubmissionResult[]> {
   try {
-    return await inBatches(entries, MAX_ITEMS_PER_REQUEST, async (batch) =>
-      readResults(
-        await invokeGateway({ action: "SUBMIT_TIMESHEET", entries: batch })
-      ).map(toSubmissionResult)
-    )
+    // A failing batch doesn't discard the results of the batches before it:
+    // only its own lines are marked failed, and resending them is safe since
+    // the gateway finds a line Odoo already created instead of duplicating it.
+    return await inBatches(entries, MAX_ITEMS_PER_REQUEST, async (batch) => {
+      try {
+        return readResults(
+          await invokeGateway({ action: "SUBMIT_TIMESHEET", entries: batch })
+        ).map(toSubmissionResult)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return batch.map(({ clientId }): SubmissionResult => ({
+          clientId,
+          success: false,
+          error: message,
+        }))
+      }
+    })
   } finally {
     // Even a partial failure may have created lines.
     invalidateTimesheetReads()
