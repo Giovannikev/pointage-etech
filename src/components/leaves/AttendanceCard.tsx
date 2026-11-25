@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import {
   AlertTriangleIcon,
   Loader2Icon,
@@ -26,6 +26,7 @@ import { useFormatters } from "@/hooks/useFormatters"
 import { cn } from "@/lib/utils"
 import { useCheckInOut } from "@/hooks/useCheckInOut"
 import { useNow } from "@/hooks/useNow"
+import { usePresetPeriod } from "@/hooks/usePresetPeriod"
 import {
   expectedHours,
   type AutoAttendancePreferences,
@@ -39,7 +40,6 @@ import {
 } from "@/services/odooService"
 import type {
   AttendanceInstanceResult,
-  CommitPeriod,
   TimeOffInstanceResult,
 } from "@/types/timesheet"
 import { todayIsoDate } from "@/utils/date"
@@ -52,7 +52,7 @@ import {
   workedTimeTypeKeys,
   type AttendanceAnomaly,
 } from "@/utils/leaves"
-import { getPresetPeriod, isValidPeriod } from "@/utils/period"
+import { isValidPeriod } from "@/utils/period"
 
 type AvailableAttendance = Extract<AttendanceInstanceResult, { ok: true }>
 type AvailableTimeOff = Extract<TimeOffInstanceResult, { ok: true }>
@@ -143,7 +143,7 @@ function CheckInStatus({
       <Button
         variant={isIn ? "outline" : "default"}
         disabled={isSaving}
-        onClick={() => void toggle()}
+        onClick={() => void toggle(isIn)}
         className="max-sm:w-full"
       >
         {isSaving ? (
@@ -168,9 +168,7 @@ export function AttendanceCard({
 }) {
   const { t } = useTranslation()
   const { formatLongDate, formatTime } = useFormatters()
-  const [period, setPeriod] = useState<CommitPeriod>(() =>
-    getPresetPeriod("thisWeek")
-  )
+  const [period, setPeriod] = usePresetPeriod("thisWeek")
   const now = useNow()
   const { from, to } = period
   const fetcher = useCallback(

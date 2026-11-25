@@ -129,3 +129,21 @@ export function formatPeriod(period: CommitPeriod, locale: string): string {
     ? formatLongDate(period.from, locale)
     : `${formatShortDate(period.from, locale)} – ${formatShortDate(period.to, locale)}`
 }
+
+/**
+ * The period once the day changed: a period that matched a preset on the
+ * previous day ("today", "this week"...) moves with it, any other period
+ * (picked by hand) stays. So an app left open overnight fetches the new
+ * day's commits, not yesterday's.
+ */
+export function rollPeriodToToday(
+  period: CommitPeriod,
+  previousToday: string,
+  today: string
+): CommitPeriod {
+  const preset = PERIOD_PRESETS.find((candidate) => {
+    const before = getPresetPeriod(candidate, previousToday)
+    return before.from === period.from && before.to === period.to
+  })
+  return preset === undefined ? period : getPresetPeriod(preset, today)
+}
