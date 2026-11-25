@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import {
   ArchiveIcon,
   Columns3Icon,
@@ -413,6 +420,10 @@ export function TaskBoard({ scope }: TaskBoardProps) {
       ? []
       : listProjects(data, { instance, showClosed }, tickets)
   }, [isAll, projectsQuery.data, data, instance, showClosed, tickets])
+  // Rebuilding the board with hundreds of cards on every keystroke made
+  // typing lag: React builds it with the deferred query once typing pauses,
+  // and the field stays responsive meanwhile.
+  const boardQuery = useDeferredValue(query)
   const columns = useMemo(
     () =>
       data === undefined
@@ -422,13 +433,13 @@ export function TaskBoard({ scope }: TaskBoardProps) {
             {
               instance,
               showClosed,
-              query,
+              query: boardQuery,
               projects,
               groupBy,
             },
             tickets
           ),
-    [data, instance, showClosed, query, projects, groupBy, tickets]
+    [data, instance, showClosed, boardQuery, projects, groupBy, tickets]
   )
   const closedCount = useMemo(
     () => (data === undefined ? 0 : countClosedTasks(data, instance)),
