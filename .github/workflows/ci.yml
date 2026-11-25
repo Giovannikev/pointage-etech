@@ -36,10 +36,12 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      # deno.json keeps npm: imports in Deno's own cache: without it Deno sees
+      # the app's package.json and looks for them in node_modules.
       - name: Type-check every function
-        run: deno check supabase/functions/*/index.ts
+        run: deno check --config supabase/functions/deno.json supabase/functions/*/index.ts
       - name: Deno tests
-        run: deno test supabase/functions
+        run: deno test --config supabase/functions/deno.json supabase/functions
 
   deploy-functions:
     name: Deploy the Edge Functions
