@@ -502,6 +502,42 @@ async function savePunchTimes(
   }
 }
 
+/**
+ * Records the punch as taken before sending it, only if no other run did:
+ * a run can outlast the one-minute schedule (slow Odoo), and the next one
+ * would otherwise see the same punch due and toggle a second time.
+ */
+async function claimPunch(userId: string, at: string): Promise<boolean> {
+  const { data, error } = await getAdminClient()
+    .from(TABLE)
+    .update({ last_punch_at: at })
+    .eq("user_id", userId)
+    .or(`last_punch_at.is.null,last_punch_at.lt."${at}"`)
+    .select("user_id")
+  if (error !== null) {
+    throw new HttpError(`Couldn't record the punch: ${error.message}`, 500)
+  }
+  return Array.isArray(data) && data.length > 0
+}
+
+/** Gives a claimed punch back after a failure, unless a later one replaced it. */
+async function releasePunch(
+  userId: string,
+  at: string,
+  previous: Date | null
+): Promise<void> {
+  const { error } = await getAdminClient()
+    .from(TABLE)
+    .update({ last_punch_at: previous?.toISOString() ?? null })
+    .eq("user_id", userId)
+    .eq("last_punch_at", at)
+  if (error !== null) {
+    console.error(
+      `auto-attendance: user ${userId}: release failed: ${error.message}`
+    )
+  }
+}
+
 async function punch(preference: Preference, now: Date): Promise<Outcome> {
   if (outsideWorkingHours(preference, now) || nothingDue(preference, now)) {
     return "idle"
@@ -535,17 +571,26 @@ async function punch(preference: Preference, now: Date): Promise<Outcome> {
     return "idle"
   }
 
-  const isIn = (await readOpenAttendanceId(session, employeeId)) !== null
+  const latestAt = latest.at.toISOString()
+  if (!(await claimPunch(preference.userId, latestAt))) {
+    // A run still busy with this punch claimed it: toggling here too would
+    // undo its punch.
+    return "idle"
+  }
   let outcome: Outcome = "already_right"
-  if ((latest.action === "in") !== isIn) {
-    await toggleAttendance(session, employeeId)
-    outcome = latest.action === "in" ? "checked_in" : "checked_out"
+  try {
+    const isIn = (await readOpenAttendanceId(session, employeeId)) !== null
+    if ((latest.action === "in") !== isIn) {
+      await toggleAttendance(session, employeeId)
+      outcome = latest.action === "in" ? "checked_in" : "checked_out"
+    }
+  } catch (error) {
+    // Released so the next runs retry it, within the catch-up time.
+    await releasePunch(preference.userId, latestAt, preference.lastPunchAt)
+    throw error
   }
 
-  await savePunchTimes(preference.userId, {
-    last_punch_at: latest.at.toISOString(),
-    next_punch_at: next,
-  })
+  await savePunchTimes(preference.userId, { next_punch_at: next })
   console.log(
     `auto-attendance: user ${preference.userId}: ${outcome} for ${clock(latest.minute)} (${plan.remote ? "remote, " : ""}${plan.leaves.filter((leave) => leave.counted).length} time off, ${plan.holidays} holidays)`
   )
