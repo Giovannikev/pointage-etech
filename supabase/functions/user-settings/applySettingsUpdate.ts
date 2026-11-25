@@ -46,10 +46,33 @@ function hasSameConnection(
   )
 }
 
+/** True when the update targets another server, database or login. */
+function changesConnection(
+  stored: OdooInstanceSettings,
+  update: OdooInstanceUpdate
+): boolean {
+  return (
+    stored.url !== update.url ||
+    stored.login !== update.login ||
+    // An empty database means "detect it", which can't move to another server.
+    (update.db !== "" && stored.db !== update.db)
+  )
+}
+
 async function resolveOdooInstance(
   stored: OdooInstanceSettings | undefined,
   update: OdooInstanceUpdate
 ): Promise<OdooInstanceSettings> {
+  // The stored key is reused only for the same server and account: otherwise
+  // a stolen session could point the instance at its own server and receive
+  // the key when the new connection is checked.
+  const reusesKey = update.apiKey === null && stored !== undefined
+  if (reusesKey && changesConnection(stored, update)) {
+    throw new HttpError(
+      `Enter the API key of ${update.label} again: its address, database or login changed.`,
+      400
+    )
+  }
   const apiKey = update.apiKey ?? stored?.apiKey
   if (apiKey === undefined) {
     throw new HttpError(`Enter the API key of ${update.label}.`, 400)

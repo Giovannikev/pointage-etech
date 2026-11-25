@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { parseSettingsUpdate } from "../supabase/functions/_shared/settings.ts"
+import {
+  isPublicHttpsOrigin,
+  parseSettingsUpdate,
+} from "../supabase/functions/_shared/settings.ts"
 
 const EDOO = {
   index: 2,
@@ -28,5 +31,38 @@ describe("parseSettingsUpdate", () => {
 
   it("rejects a body without the GitHub field", () => {
     expect(() => parseSettingsUpdate({ odooInstances: [EDOO] })).toThrow()
+  })
+})
+
+describe("isPublicHttpsOrigin", () => {
+  it.each([
+    "https://www.edoo-it.com",
+    "https://pmo-buodoo.arkeup.com",
+    "https://8.8.8.8",
+  ])("accepts %s", (origin) => {
+    expect(isPublicHttpsOrigin(origin)).toBe(true)
+  })
+
+  it.each([
+    "http://www.edoo-it.com",
+    "https://localhost",
+    "https://odoo.local",
+    "https://127.0.0.1",
+    "https://10.0.0.5",
+    "https://172.20.1.1",
+    "https://192.168.1.10",
+    "https://169.254.169.254",
+    "https://[::1]",
+  ])("refuses %s", (origin) => {
+    expect(isPublicHttpsOrigin(origin)).toBe(false)
+  })
+
+  it("refuses an http instance when saving", () => {
+    expect(() =>
+      parseSettingsUpdate({
+        github: null,
+        odooInstances: [{ ...EDOO, url: "http://www.edoo-it.com" }],
+      })
+    ).toThrow(/https/)
   })
 })

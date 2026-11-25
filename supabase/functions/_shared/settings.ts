@@ -136,6 +136,39 @@ function normalizeOdooUrl(value: unknown): string | null {
   }
 }
 
+const PRIVATE_IPV4 = [
+  /^0\./,
+  /^10\./,
+  /^127\./,
+  /^169\.254\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^192\.168\./,
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
+]
+
+/**
+ * True for an https origin on a public host. The functions send the API key
+ * to this address, so http (key in clear) and local or private hosts (the
+ * Supabase network, cloud metadata) are refused when settings are saved.
+ * Names that resolve to a private address aren't caught here.
+ */
+export function isPublicHttpsOrigin(origin: string): boolean {
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return false
+  }
+  const host = url.hostname.toLowerCase()
+  return (
+    url.protocol === "https:" &&
+    host.includes(".") &&
+    !host.startsWith("[") &&
+    !/\.(localhost|local|internal)$/.test(host) &&
+    !PRIVATE_IPV4.some((range) => range.test(host))
+  )
+}
+
 function parseInstanceFields(value: unknown): OdooInstanceView | null {
   if (!isRecord(value)) {
     return null
@@ -211,6 +244,12 @@ export function parseSettingsUpdate(body: unknown): SettingsUpdate {
     const fields = parseInstanceFields(raw)
     if (fields === null || !isRecord(raw) || !isOptionalSecret(raw.apiKey)) {
       throw new HttpError(`Odoo instance ${position + 1} is invalid.`, 400)
+    }
+    if (!isPublicHttpsOrigin(fields.url)) {
+      throw new HttpError(
+        `${fields.label}: the Odoo address must start with https:// and be reachable on the internet.`,
+        400
+      )
     }
     return { ...fields, apiKey: raw.apiKey === null ? null : raw.apiKey.trim() }
   })
