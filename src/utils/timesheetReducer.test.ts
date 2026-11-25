@@ -50,6 +50,58 @@ function entry(changes: Partial<TimesheetEntry> = {}): TimesheetEntry {
 }
 
 describe("timesheetReducer", () => {
+  describe("entriesAdded", () => {
+    it("appends new lines", () => {
+      const next = timesheetReducer([entry()], {
+        type: "entriesAdded",
+        entries: [entry({ id: "b", commit: commit("[FIX] 03-038 typo") })],
+      })
+      expect(next.map((line) => line.id)).toEqual(["a", "b"])
+    })
+
+    it("skips a commit already in the list for the same day", () => {
+      const state = [entry()]
+      const next = timesheetReducer(state, {
+        type: "entriesAdded",
+        entries: [entry({ id: "b" })],
+      })
+      expect(next).toBe(state)
+    })
+
+    it("keeps the same commit on another day", () => {
+      const next = timesheetReducer([entry()], {
+        type: "entriesAdded",
+        entries: [entry({ id: "b", date: "2026-11-24" })],
+      })
+      expect(next.map((line) => line.id)).toEqual(["a", "b"])
+    })
+
+    it("adds a commit repeated within one import once", () => {
+      const next = timesheetReducer([], {
+        type: "entriesAdded",
+        entries: [entry({ id: "a" }), entry({ id: "b" })],
+      })
+      expect(next.map((line) => line.id)).toEqual(["a"])
+    })
+
+    it("checks against the list as it is when two imports overlap", () => {
+      // A paste lands while a GitHub fetch runs; the fetch brings the same
+      // commits and must not add them again.
+      const afterPaste = timesheetReducer([], {
+        type: "entriesAdded",
+        entries: [entry({ id: "pasted" })],
+      })
+      const afterFetch = timesheetReducer(afterPaste, {
+        type: "entriesAdded",
+        entries: [
+          entry({ id: "fetched" }),
+          entry({ id: "other", commit: commit("[IMP] 03-038 speed") }),
+        ],
+      })
+      expect(afterFetch.map((line) => line.id)).toEqual(["pasted", "other"])
+    })
+  })
+
   describe("verificationResolved", () => {
     it("marks a line without a task as missing", () => {
       const [line] = timesheetReducer(

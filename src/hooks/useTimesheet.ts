@@ -1,5 +1,5 @@
 import i18n from "i18next"
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { logOnTarget, matchTarget } from "@/components/timesheet/logTarget"
 import { fetchCommits } from "@/services/commitSourceService"
@@ -38,6 +38,7 @@ import {
   toEstimateLine,
   withManualTask,
   type DatedCommit,
+  type TimesheetAction,
 } from "@/utils/timesheetReducer"
 import {
   canAssignTask,
@@ -192,10 +193,6 @@ async function submitLines(
   return [...taskResults, ...ticketResults]
 }
 
-function entryKey(rawMessage: string, date: string): string {
-  return `${date}\u0000${rawMessage}`
-}
-
 export interface UseTimesheetResult {
   entries: TimesheetEntry[]
   /** Days whose GitHub commits are imported. */
@@ -233,11 +230,14 @@ export interface UseTimesheetResult {
 }
 
 export function useTimesheet(userId: string): UseTimesheetResult {
-  const [entries, dispatch] = useReducer(
-    timesheetReducer,
-    userId,
-    loadTimesheetDraft
-  )
+  const [entries, setEntries] = useState(() => loadTimesheetDraft(userId))
+  // The list as the last action left it, ahead of the next render: an import
+  // reads which of its lines the reducer actually added.
+  const latestEntries = useRef(entries)
+  const dispatch = useCallback((action: TimesheetAction): void => {
+    latestEntries.current = timesheetReducer(latestEntries.current, action)
+    setEntries(latestEntries.current)
+  }, [])
   const [period, setPeriod] = usePresetPeriod("today")
 
   // The lines survive a reload: see timesheetDraft.
@@ -329,25 +329,17 @@ export function useTimesheet(userId: string): UseTimesheetResult {
         }
       }
     },
-    []
+    [dispatch]
   )
 
   const addAndVerify = useCallback(
     async (commits: DatedCommit[]): Promise<ImportSummary> => {
-      const known = new Set(
-        entries.map((entry) => entryKey(entry.commit.rawMessage, entry.date))
-      )
-      const fresh = commits.filter(({ commit, date }) => {
-        const key = entryKey(commit.rawMessage, date)
-        if (known.has(key)) {
-          return false
-        }
-        known.add(key)
-        return true
-      })
-
-      const newEntries = fresh.map(createEntry)
-      dispatch({ type: "entriesAdded", entries: newEntries })
+      const candidates = commits.map(createEntry)
+      // The reducer skips the commits already in the list as it is now, not
+      // as this render saw it: another import may have added them meanwhile.
+      dispatch({ type: "entriesAdded", entries: candidates })
+      const added = new Set(latestEntries.current.map((entry) => entry.id))
+      const newEntries = candidates.filter((entry) => added.has(entry.id))
       const verification = await verify(newEntries)
       // Once tasks and Odoo duplicates are known, spread the workday over
       // the days that received new lines (the user's typed hours stay).
@@ -360,11 +352,11 @@ export function useTimesheet(userId: string): UseTimesheetResult {
 
       return {
         added: newEntries.length,
-        duplicates: commits.length - fresh.length,
+        duplicates: commits.length - newEntries.length,
         verification,
       }
     },
-    [entries, verify]
+    [dispatch, verify]
   )
 
   const importFromText = useCallback(
@@ -394,7 +386,7 @@ export function useTimesheet(userId: string): UseTimesheetResult {
     } finally {
       setIsImporting(false)
     }
-  }, [addAndVerify, period])
+  }, [addAndVerify, dispatch, period])
 
   const submit = useCallback(
     async (targets: TimesheetEntry[]): Promise<SubmissionSummary> => {
@@ -415,7 +407,7 @@ export function useTimesheet(userId: string): UseTimesheetResult {
         return { submitted: 0, failed: ids.length, errorMessage: message }
       }
     },
-    []
+    [dispatch]
   )
 
   const verifyEntry = useCallback(
@@ -448,7 +440,7 @@ export function useTimesheet(userId: string): UseTimesheetResult {
       }
       return verification
     },
-    [entries, verify]
+    [dispatch, entries, verify]
   )
 
   const submitEntry = useCallback(
@@ -458,17 +450,26 @@ export function useTimesheet(userId: string): UseTimesheetResult {
 
   const submitAll = useCallback(() => submit(entries), [entries, submit])
 
-  const updateDescription = useCallback((id: string, description: string) => {
-    dispatch({ type: "descriptionChanged", id, description })
-  }, [])
+  const updateDescription = useCallback(
+    (id: string, description: string) => {
+      dispatch({ type: "descriptionChanged", id, description })
+    },
+    [dispatch]
+  )
 
-  const updateHours = useCallback((id: string, hours: number) => {
-    dispatch({ type: "hoursChanged", id, hours })
-  }, [])
+  const updateHours = useCallback(
+    (id: string, hours: number) => {
+      dispatch({ type: "hoursChanged", id, hours })
+    },
+    [dispatch]
+  )
 
-  const removeEntry = useCallback((id: string) => {
-    dispatch({ type: "entryRemoved", id })
-  }, [])
+  const removeEntry = useCallback(
+    (id: string) => {
+      dispatch({ type: "entryRemoved", id })
+    },
+    [dispatch]
+  )
 
   const findOdooLine = useCallback(
     (id: string) => {
@@ -499,7 +500,7 @@ export function useTimesheet(userId: string): UseTimesheetResult {
         description: saved.description,
       })
     },
-    [findOdooLine]
+    [dispatch, findOdooLine]
   )
 
   const deleteFromOdoo = useCallback(
@@ -507,12 +508,12 @@ export function useTimesheet(userId: string): UseTimesheetResult {
       await deleteTimesheet(findOdooLine(id))
       dispatch({ type: "loggedEntryDeleted", id })
     },
-    [findOdooLine]
+    [dispatch, findOdooLine]
   )
 
   const estimateAllHours = useCallback((): void => {
     dispatch({ type: "hoursEstimated", dates: null })
-  }, [])
+  }, [dispatch])
 
   const estimableCount = useMemo(
     () =>

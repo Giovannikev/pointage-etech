@@ -217,13 +217,39 @@ function applyEstimate(
   })
 }
 
+/** Same commit message on the same day: the same line. */
+function entryKey(entry: TimesheetEntry): string {
+  return `${entry.date}\u0000${entry.commit.rawMessage}`
+}
+
+/**
+ * Appends the lines whose commit isn't in the list yet, checked against the
+ * list as it is when the action runs: two imports overlapping (a paste
+ * during a GitHub fetch) can't add the same commit twice.
+ */
+function addEntries(
+  entries: TimesheetEntry[],
+  candidates: TimesheetEntry[]
+): TimesheetEntry[] {
+  const known = new Set(entries.map(entryKey))
+  const fresh = candidates.filter((candidate) => {
+    const key = entryKey(candidate)
+    if (known.has(key)) {
+      return false
+    }
+    known.add(key)
+    return true
+  })
+  return fresh.length === 0 ? entries : [...entries, ...fresh]
+}
+
 export function timesheetReducer(
   entries: TimesheetEntry[],
   action: TimesheetAction
 ): TimesheetEntry[] {
   switch (action.type) {
     case "entriesAdded":
-      return [...entries, ...action.entries]
+      return addEntries(entries, action.entries)
 
     case "entryRemoved":
       return entries.filter(
