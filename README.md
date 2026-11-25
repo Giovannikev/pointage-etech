@@ -13,8 +13,9 @@ submitted to Odoo (`account.analytic.line`) on the right project and task.
 - **Commits from GitHub**: every repository and every branch the user pushed
   to, for any period up to a year (presets, a whole month, or a date range).
   Commits can also be pasted, e.g. from `git log`.
-- **Two Odoo instances**: each task is looked up in instance 1, then in
-  instance 2, and logged where it was found.
+- **One or two Odoo instances**: each task is looked up in every configured
+  instance, and logged where it was found. An instance that doesn't answer
+  doesn't stop the others.
 - **Duplicate check**: lines already in Odoo with the same task, day and
   description are marked _Already logged_ and can't be sent twice. Time already
   logged on the same task that day is shown as a warning.
@@ -100,7 +101,10 @@ the three Edge Functions. Either path below works.
    `CREDENTIALS_ENCRYPTION_KEY` with that value.
 4. **Functions**: in **Edge Functions → Deploy a new function → Via Editor**,
    create `user-settings`, `github-commits` and `odoo-gateway` (exact names),
-   each from its single-file build. Keep **Verify JWT** enabled.
+   each from its single-file build. Keep **Verify JWT** enabled. For the
+   automatic attendance, also create `auto-attendance` with **Verify JWT**
+   off (see below). Once the CI secrets are set, pushes to `main` deploy
+   them all (see _Deploying the Edge Functions automatically_).
 
 The dashboard editor works on one function at a time and can't import
 `supabase/functions/_shared`, so each function is pasted as a single file.
@@ -108,7 +112,7 @@ Build them with:
 
 ```bash
 mkdir -p dist-functions
-for fn in user-settings github-commits odoo-gateway; do
+for fn in user-settings github-commits odoo-gateway auto-attendance; do
   python3 scripts/bundle-functions.py "$fn" > "dist-functions/$fn.ts"
 done
 ```
@@ -131,20 +135,29 @@ pnpm dlx supabase link --project-ref <ref>
 pnpm dlx supabase db push
 pnpm dlx supabase secrets set CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 pnpm dlx supabase functions deploy user-settings github-commits odoo-gateway
+pnpm dlx supabase functions deploy auto-attendance --no-verify-jwt
 ```
 
 ### Edge Function secrets
 
-| Secret                       | Required | Purpose                                          |
-| ---------------------------- | -------- | ------------------------------------------------ |
-| `CREDENTIALS_ENCRYPTION_KEY` | Yes      | 32 random bytes in base64, encrypts the settings |
-| `ALLOWED_ORIGIN`             | No       | CORS origin of the app (defaults to `*`)         |
+| Secret                                | Required | Purpose                                                                                  |
+| ------------------------------------- | -------- | ---------------------------------------------------------------------------------------- |
+| `CREDENTIALS_ENCRYPTION_KEY`          | Yes      | 32 random bytes in base64, encrypts the settings                                         |
+| `CREDENTIALS_ENCRYPTION_KEY_PREVIOUS` | No       | The old key while changing it (see below)                                                |
+| `CRON_SECRET`                         | For auto | Shared with pg_cron (Vault), protects `auto-attendance`                                  |
+| `ALLOWED_ORIGIN`                      | No       | Sites allowed to call the functions, e.g. `https://pointage-etech.netlify.app`; set it in production (defaults to `*`) |
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided by Supabase.
 
 Keep a copy of `CREDENTIALS_ENCRYPTION_KEY` in a password manager. If it is
-lost or changed, the stored settings can't be decrypted and every
-collaborator has to save them again.
+lost, the stored settings can't be decrypted and every collaborator has to
+save them again.
+
+To change it, set the current key as `CREDENTIALS_ENCRYPTION_KEY_PREVIOUS`
+and a new one as `CREDENTIALS_ENCRYPTION_KEY`. Settings are read with either
+key and sealed again with the new one the next time they are loaded (by the
+user or by the automatic attendance cron). After a few days, once everyone
+has been seen, remove the previous key.
 
 ### Authentication
 
@@ -166,13 +179,15 @@ After signing in, open **Settings**:
   organization using SSO, authorize the token for that organization. Add
   other commit emails if your local Git email isn't linked to your GitHub
   account.
-- **Odoo instance 1** (required) and **instance 2** (optional): a name, the
-  URL, the database (detected when the server hosts a single one), the login,
+- **Odoo instances 1 and 2** (at least one): a name, the `https://`
+  address, the database (detected when the server hosts a single one), the login,
   and an API key (**Preferences → Account Security → New API Key**). A
   password also works when two-factor authentication is off.
 
 Saving checks every new or changed credential against GitHub and Odoo before
-storing it. Leaving a secret field empty keeps the stored value.
+storing it. Leaving a secret field empty keeps the stored value, except when
+the instance's address, database or login changes: the API key is then asked
+again, so it is never sent to another server.
 
 ## Using the timesheet
 
@@ -522,7 +537,7 @@ this browser only).
 | Saving settings fails                | The notification gives the reason; details in **Edge Functions → Logs**                   |
 | _Couldn't detect the database_       | Enter the Odoo database name in Settings                                                  |
 | _… redirects to …_                   | Use the address given in the message as the Odoo URL                                      |
-| _Stored settings can't be decrypted_ | `CREDENTIALS_ENCRYPTION_KEY` changed: save the settings again                             |
+| _Stored settings can't be decrypted_ | `CREDENTIALS_ENCRYPTION_KEY` changed: set the old one as `CREDENTIALS_ENCRYPTION_KEY_PREVIOUS`, or save the settings again |
 | Commits missing                      | Add your local Git email in Settings; check the token can read the repository             |
 | A task is _Missing_                  | The message needs a reference such as `[03-500]`, and you need access to the task in Odoo |
 | The header doesn't stay at the top   | `SidebarInset` in `src/components/ui/sidebar.tsx` must not have `overflow-hidden`         |
