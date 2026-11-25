@@ -65,10 +65,16 @@ function PageLoader() {
   )
 }
 
-function Workspace({ userEmail }: { userEmail: string }) {
+function Workspace({
+  userId,
+  userEmail,
+}: {
+  userId: string
+  userEmail: string
+}) {
   const { t } = useTranslation()
   const { view, navigate } = useHashNavigation()
-  const timesheet = useTimesheet()
+  const timesheet = useTimesheet(userId)
   const openSettings = (): void => navigate("settings")
 
   // Cached Odoo reads belong to this account: drop them when it leaves.
@@ -169,7 +175,10 @@ function SessionScreen({
       return (
         // Keyed by user so nothing from a previous account survives a switch.
         <SettingsProvider key={session.user.id}>
-          <Workspace userEmail={session.user.email ?? ""} />
+          <Workspace
+            userId={session.user.id}
+            userEmail={session.user.email ?? ""}
+          />
         </SettingsProvider>
       )
   }

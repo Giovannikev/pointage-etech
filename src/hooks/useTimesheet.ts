@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useState } from "react"
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react"
 
 import { logOnTarget, matchTarget } from "@/components/timesheet/logTarget"
 import { fetchCommits } from "@/services/commitSourceService"
@@ -31,7 +31,9 @@ import {
   reconcileWithOdoo,
   type OdooReconciliation,
 } from "@/utils/odooReconciliation"
-import { getPresetPeriod, isInPeriod } from "@/utils/period"
+import { isInPeriod } from "@/utils/period"
+import { loadTimesheetDraft, saveTimesheetDraft } from "@/utils/timesheetDraft"
+import { usePresetPeriod } from "@/hooks/usePresetPeriod"
 import { describeCommit } from "@/utils/timesheetDescription"
 import {
   canAssignTask,
@@ -599,11 +601,27 @@ export interface UseTimesheetResult {
   estimableCount: number
 }
 
-export function useTimesheet(): UseTimesheetResult {
-  const [entries, dispatch] = useReducer(timesheetReducer, [])
-  const [period, setPeriod] = useState<CommitPeriod>(() =>
-    getPresetPeriod("today")
+export function useTimesheet(userId: string): UseTimesheetResult {
+  const [entries, dispatch] = useReducer(
+    timesheetReducer,
+    userId,
+    loadTimesheetDraft
   )
+  const [period, setPeriod] = usePresetPeriod("today")
+
+  // The lines survive a reload: see timesheetDraft.
+  useEffect(() => saveTimesheetDraft(userId, entries), [userId, entries])
+
+  // A line being sent when the tab closes may or may not reach Odoo.
+  const isSubmitting = entries.some((entry) => entry.activity === "submitting")
+  useEffect(() => {
+    if (!isSubmitting) {
+      return
+    }
+    const warn = (event: BeforeUnloadEvent): void => event.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [isSubmitting])
   const [isImporting, setIsImporting] = useState(false)
 
   const verify = useCallback(
@@ -894,8 +912,6 @@ export function useTimesheet(): UseTimesheetResult {
     () => entries.filter(isSubmittable).length,
     [entries]
   )
-
-  const isSubmitting = entries.some((entry) => entry.activity === "submitting")
 
   return {
     entries,
