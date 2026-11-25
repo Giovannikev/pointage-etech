@@ -79,20 +79,24 @@ import {
 } from "../_shared/odoo.ts"
 import { readOdooDatetime, toOdooDatetime } from "../_shared/odooDates.ts"
 import { getModelFields, optionalModelFields } from "../_shared/odooFields.ts"
+import {
+  CATCH_UP_MINUTES,
+  nothingDue,
+  outsideWorkingHours,
+  routineDueOn,
+} from "../_shared/autoAttendanceTiming.ts"
 import { loadSettings } from "../_shared/settingsStore.ts"
 import { isRecord } from "../_shared/validation.ts"
 
 const TABLE = "auto_attendance_preferences"
 const ROUTINES_TABLE = "timesheet_routines"
 /** How long after its time a routine that couldn't be logged is retried. */
-const ROUTINE_CATCH_UP_MINUTES = 120
 /** The day off check's schedule for users without automatic attendance. */
 const DEFAULT_SCHEDULE: WorkSchedule = {
   morning: [9 * 60, 12 * 60 + 30],
   afternoon: [13 * 60 + 30, 17 * 60 + 30],
 }
 /** How long a planned punch that couldn't be made is retried. */
-const CATCH_UP_MINUTES = 30
 
 interface Preference {
   userId: string
@@ -400,30 +404,6 @@ async function planDay(
 /* Run                                                                 */
 /* ------------------------------------------------------------------ */
 
-/** True when the run can't have a punch to make: no Odoo call then. */
-function outsideWorkingHours(preference: Preference, now: Date): boolean {
-  const local = localMoment(now, preference.timezone)
-  if (local === null || local.weekday > 5) return true
-  const { morning, afternoon } = preference.schedule
-  // Time off only removes work: every punch falls within the schedule.
-  const dayEnd = Math.max(afternoon[1], preference.remoteAfternoonEnd ?? 0)
-  return (
-    local.minute < morning[0] ||
-    local.minute > dayEnd + preference.randomWindow + CATCH_UP_MINUTES
-  )
-}
-
-/**
- * True when Odoo can wait: off the quarter hours (where time off starts and
- * ends), before the next punch found at the last read.
- */
-function nothingDue(preference: Preference, now: Date): boolean {
-  const local = localMoment(now, preference.timezone)
-  if (local === null || local.minute % 15 === 0) return false
-  const next = preference.nextPunchAt
-  return next === null || next.getTime() > now.getTime()
-}
-
 async function savePunchTimes(
   userId: string,
   times: { last_punch_at?: string; next_punch_at: string | null }
@@ -636,21 +616,6 @@ function readRoutine(row: unknown): Routine | null {
     lastLoggedOn:
       typeof row.last_logged_on === "string" ? row.last_logged_on : null,
   }
-}
-
-/** The local day the routine is due on at `now`, or null when it isn't. */
-function routineDueOn(routine: Routine, now: Date): string | null {
-  const local = localMoment(now, routine.timezone)
-  if (
-    local === null ||
-    local.weekday > 5 ||
-    local.minute < routine.logAt ||
-    local.minute > routine.logAt + ROUTINE_CATCH_UP_MINUTES ||
-    routine.lastLoggedOn === local.date
-  ) {
-    return null
-  }
-  return local.date
 }
 
 /**
