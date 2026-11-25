@@ -66,12 +66,19 @@ import { requireEnv } from "../_shared/env.ts"
 import { HttpError } from "../_shared/errors.ts"
 import { corsHeaders } from "../_shared/http.ts"
 import {
+  COUNTED_LEAVE_STATES,
+  LEAVE_SPAN_FIELDS,
+  readPublicHolidayRecords,
+} from "../_shared/leaves.ts"
+import {
   createSessionPool,
   executeKw,
   OdooRpcError,
   type OdooSession,
   readMany2one,
 } from "../_shared/odoo.ts"
+import { readOdooDatetime, toOdooDatetime } from "../_shared/odooDates.ts"
+import { getModelFields, optionalModelFields } from "../_shared/odooFields.ts"
 import { loadSettings } from "../_shared/settingsStore.ts"
 import { isRecord } from "../_shared/validation.ts"
 
@@ -86,19 +93,6 @@ const DEFAULT_SCHEDULE: WorkSchedule = {
 }
 /** How long a planned punch that couldn't be made is retried. */
 const CATCH_UP_MINUTES = 30
-/** Pending and approved requests: a refused or cancelled one doesn't count. */
-const LEAVE_STATES = ["confirm", "validate1", "validate"]
-const LEAVE_FIELDS = [
-  "holiday_status_id",
-  "request_date_from",
-  "request_date_to",
-  "request_unit_half",
-  "request_unit_hours",
-  "request_date_from_period",
-  "request_date_to_period",
-  "request_hour_from",
-  "request_hour_to",
-]
 
 interface Preference {
   userId: string
@@ -198,18 +192,6 @@ function clock(minute: number): string {
   return `${String(Math.floor(rounded / 60)).padStart(2, "0")}:${String(rounded % 60).padStart(2, "0")}`
 }
 
-/** Odoo datetimes are UTC "YYYY-MM-DD HH:MM:SS". */
-function readOdooDatetime(value: unknown): Date | null {
-  if (typeof value !== "string") return null
-  const date = new Date(`${value.replace(" ", "T")}Z`)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-/** An Odoo datetime for a domain. */
-function toOdooDatetime(date: Date): string {
-  return date.toISOString().slice(0, 19).replace("T", " ")
-}
-
 /* ------------------------------------------------------------------ */
 /* Odoo                                                                */
 /* ------------------------------------------------------------------ */
@@ -232,14 +214,9 @@ async function findAttendanceInstance(
   for (const { index } of instances) {
     try {
       const session = await getSession(index)
-      try {
-        await executeKw(session, "hr.attendance", "fields_get", [], {
-          attributes: ["type"],
-        })
-      } catch (error) {
-        // "Object hr.attendance doesn't exist": the app isn't installed.
-        if (error instanceof OdooRpcError) continue
-        throw error
+      // "Object hr.attendance doesn't exist": the app isn't installed.
+      if ((await optionalModelFields(session, "hr.attendance")) === null) {
+        continue
       }
       const employeeId = await readOwnEmployeeId(session)
       if (employeeId !== null) return { session, employeeId }
@@ -321,12 +298,8 @@ async function readLeaves(
   workedSpans: LeaveSpan[]
   found: FoundLeave[]
 }> {
-  const description = await executeKw(session, "hr.leave", "fields_get", [], {
-    attributes: ["type"],
-  })
-  const fields = LEAVE_FIELDS.filter(
-    (field) => isRecord(description) && field in description
-  )
+  const available = await getModelFields(session, "hr.leave")
+  const fields = LEAVE_SPAN_FIELDS.filter((field) => available.has(field))
   const records = await executeKw(
     session,
     "hr.leave",
@@ -334,7 +307,7 @@ async function readLeaves(
     [
       [
         ["employee_id", "=", employeeId],
-        ["state", "in", LEAVE_STATES],
+        ["state", "in", COUNTED_LEAVE_STATES],
         ["request_date_from", "<=", date],
         ["request_date_to", ">=", date],
       ],
@@ -364,57 +337,19 @@ async function readLeaves(
 }
 
 /**
- * Public holidays of the day (resource.calendar.leaves without a resource),
- * as local intervals. They are company-wide: those of another working
- * schedule than the user's are left out when Odoo tells the user's.
+ * Public holidays of the day, of the user's working schedule, as local
+ * intervals.
  */
 async function readHolidays(
   session: OdooSession,
   dayStart: Date
 ): Promise<Interval[]> {
   const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000)
-  let records: unknown
-  let calendarId: number | null = null
-  try {
-    const [found, users] = await Promise.all([
-      executeKw(
-        session,
-        "resource.calendar.leaves",
-        "search_read",
-        [
-          [
-            ["resource_id", "=", false],
-            ["date_from", "<", toOdooDatetime(dayEnd)],
-            ["date_to", ">", toOdooDatetime(dayStart)],
-          ],
-        ],
-        { fields: ["date_from", "date_to", "calendar_id"] }
-      ),
-      executeKw(session, "res.users", "read", [[session.uid]], {
-        fields: ["resource_calendar_id"],
-      }).catch(() => null),
-    ])
-    records = found
-    const user = Array.isArray(users) ? users[0] : undefined
-    calendarId = isRecord(user)
-      ? (readMany2one(user.resource_calendar_id)?.id ?? null)
-      : null
-  } catch (error) {
-    // No access to the holidays: only the user's own time off counts.
-    if (error instanceof OdooRpcError) return []
-    throw error
-  }
-  if (!Array.isArray(records)) return []
+  const records = await readPublicHolidayRecords(session, [
+    ["date_from", "<", toOdooDatetime(dayEnd)],
+    ["date_to", ">", toOdooDatetime(dayStart)],
+  ])
   return records.flatMap((record): Interval[] => {
-    if (!isRecord(record)) return []
-    const calendar = readMany2one(record.calendar_id)
-    if (
-      calendar !== null &&
-      calendarId !== null &&
-      calendar.id !== calendarId
-    ) {
-      return []
-    }
     const from = readOdooDatetime(record.date_from)
     const to = readOdooDatetime(record.date_to)
     const interval =

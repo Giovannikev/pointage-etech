@@ -7,6 +7,7 @@ import {
   openWebSession,
   readMany2one,
 } from "./odoo.ts"
+import { toOdooDatetime } from "./odooDates.ts"
 import { isPositiveInteger, isRecord } from "./validation.ts"
 
 /** The signed-in user's employee on this instance; null without one. */
@@ -56,14 +57,18 @@ export async function hasModelAccess(
 
 /** Current UTC time as an Odoo datetime, "YYYY-MM-DD HH:MM:SS". */
 export function odooNow(): string {
-  return new Date().toISOString().slice(0, 19).replace("T", " ")
+  return toOdooDatetime(new Date())
 }
 
-/** The id of the employee's attendance still open (checked in, not out). */
-export async function readOpenAttendanceId(
+/**
+ * The employee's attendance still open (checked in, not out) with `fields`,
+ * as Odoo returns it; undefined when checked out.
+ */
+export async function readOpenAttendanceRecord(
   session: OdooSession,
-  employeeId: number
-): Promise<number | null> {
+  employeeId: number,
+  fields: readonly string[]
+): Promise<unknown> {
   const records = await executeKw(
     session,
     "hr.attendance",
@@ -74,9 +79,17 @@ export async function readOpenAttendanceId(
         ["check_out", "=", false],
       ],
     ],
-    { fields: ["id"], limit: 1, order: "check_in desc" }
+    { fields, limit: 1, order: "check_in desc" }
   )
-  const record = Array.isArray(records) ? records[0] : undefined
+  return Array.isArray(records) ? records[0] : undefined
+}
+
+/** The id of the employee's attendance still open (checked in, not out). */
+export async function readOpenAttendanceId(
+  session: OdooSession,
+  employeeId: number
+): Promise<number | null> {
+  const record = await readOpenAttendanceRecord(session, employeeId, ["id"])
   return isRecord(record) && isPositiveInteger(record.id) ? record.id : null
 }
 
