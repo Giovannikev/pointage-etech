@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
+import { odooCache } from "@/lib/odooCache"
+
 export interface CachedQueryResult<T> {
   /** Last loaded data for the current key; undefined until the first load. */
   data: T | undefined
@@ -28,7 +30,8 @@ function toMessage(error: unknown): string {
 /**
  * Loads data through a cache-aware fetcher. A fresh cached value is shown at
  * once (no loading state when coming back to a page); answers for a key the
- * user already left are ignored.
+ * user already left are ignored. Every invalidation of the shared cache
+ * reloads it, so all the screens showing the same data stay in step.
  *
  * `fetcher` and `peek` must be memoized by the caller for the current key.
  */
@@ -73,6 +76,14 @@ export function useCachedQuery<T>(
       isCurrent = false
     }
   }, [key, fetcher, reloadToken])
+
+  // Data changed elsewhere (a leave requested, a check-in from the header):
+  // load again. Keys that weren't invalidated answer from the cache at once,
+  // and an answer started before the change is ignored.
+  useEffect(
+    () => odooCache.subscribe(() => setReloadToken((token) => token + 1)),
+    []
+  )
 
   const refresh = useCallback((): void => {
     forceNextLoad.current = true

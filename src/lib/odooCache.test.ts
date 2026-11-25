@@ -66,3 +66,18 @@ describe("OdooCache", () => {
     expect(cache.peek(key)).toBe(2)
   })
 })
+
+describe("OdooCache subscriptions", () => {
+  it("tells subscribers of each invalidation until they leave", () => {
+    const cache = new OdooCache()
+    let calls = 0
+    const unsubscribe = cache.subscribe(() => {
+      calls += 1
+    })
+    cache.invalidate("timeOff")
+    cache.clear()
+    unsubscribe()
+    cache.invalidate()
+    expect(calls).toBe(2)
+  })
+})

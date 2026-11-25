@@ -4,6 +4,8 @@
  * - Values expire after a time to live (TTL).
  * - Concurrent reads of the same key share one request.
  * - A request started before an invalidation never writes its (stale) result.
+ * - Subscribers hear of every invalidation, so each screen showing cached
+ *   data reloads it, not only the one that changed it.
  *
  * It lives as long as the page: a reload starts empty, which is what we want
  * for data that other people can change in Odoo.
@@ -40,6 +42,7 @@ export class OdooCache {
   private readonly inflight = new Map<string, InflightRequest>()
   /** Bumped by every invalidation, so older requests don't store their result. */
   private generation = 0
+  private readonly listeners = new Set<() => void>()
   private readonly now: () => number
 
   constructor(now: () => number = Date.now) {
@@ -96,6 +99,14 @@ export class OdooCache {
     return promise
   }
 
+  /** Calls `listener` after each invalidation; returns the unsubscribe. */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
   /** Drops every key starting with the prefix (all keys when omitted). */
   invalidate(prefix = ""): void {
     this.generation += 1
@@ -108,6 +119,9 @@ export class OdooCache {
       if (id.startsWith(prefix)) {
         this.inflight.delete(id)
       }
+    }
+    for (const listener of [...this.listeners]) {
+      listener()
     }
   }
 
