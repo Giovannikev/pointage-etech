@@ -15,10 +15,23 @@ export function useCheckInOut(instanceIndex: OdooInstanceIndex) {
     (instance) => instance.index === instanceIndex
   )?.url
 
-  const toggle = async (): Promise<void> => {
+  /** Checks in when `isIn` is false, out when true: the state shown. */
+  const toggle = async (isIn: boolean): Promise<void> => {
     setIsSaving(true)
     try {
-      const openSince = await checkInOut(instanceIndex)
+      const { openSince, changed } = await checkInOut(
+        instanceIndex,
+        isIn ? "out" : "in"
+      )
+      if (!changed) {
+        // Punched elsewhere meanwhile: the refreshed state shows it.
+        toast.info(
+          openSince === null
+            ? t("leaves.alreadyCheckedOut")
+            : t("leaves.alreadyCheckedIn")
+        )
+        return
+      }
       toast.success(
         openSince === null ? t("leaves.checkedOut") : t("leaves.checkedIn")
       )

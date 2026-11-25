@@ -423,6 +423,8 @@
     "checkOut": "Check out",
     "checkedIn": "Checked in",
     "checkedOut": "Checked out",
+    "alreadyCheckedIn": "You were already checked in: nothing changed.",
+    "alreadyCheckedOut": "You were already checked out: nothing changed.",
     "checkInError": "Couldn't record the attendance",
     "openOdoo": "Open Odoo",
     "periodTotal": "Hours present in the period",

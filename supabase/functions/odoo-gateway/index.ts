@@ -25,7 +25,7 @@
  *   { action: "UPDATE_TIME_OFF", instanceIndex, leaveId, leaveTypeId, dateFrom, dateTo, period, hourFrom, hourTo, description }
  *   { action: "DELETE_TIME_OFF", instanceIndex, leaveId }
  *   { action: "GET_ATTENDANCE", dateFrom, dateTo, instanceIndex? }
- *   { action: "CHECK_IN_OUT", instanceIndex }
+ *   { action: "CHECK_IN_OUT", instanceIndex, direction? }
  *   { action: "LIST_TASKS", query?, projects?, assignees?, includeClosed, instanceIndex? }
  *   { action: "LIST_ASSIGNEES", instanceIndex? }
  */
@@ -434,7 +434,12 @@ type GatewayRequest =
   | ({ action: "UPDATE_TIME_OFF" } & TimeOffRequest & { leaveId: number })
   | ({ action: "DELETE_TIME_OFF" } & LeaveReference)
   | ({ action: "GET_ATTENDANCE" } & HistoryQuery)
-  | { action: "CHECK_IN_OUT"; instanceIndex: InstanceIndex }
+  | {
+      action: "CHECK_IN_OUT"
+      instanceIndex: InstanceIndex
+      /** The punch the user asked for; without it, a plain toggle. */
+      direction: "in" | "out" | null
+    }
   | ({ action: "LIST_TASKS" } & TaskListQuery)
   | { action: "LIST_ASSIGNEES"; instanceIndex: InstanceIndex | null }
 
@@ -868,7 +873,15 @@ function parseRequest(body: unknown): GatewayRequest {
     if (!isInstanceIndex(body.instanceIndex)) {
       throw new HttpError('"instanceIndex" is required.', 400)
     }
-    return { action: "CHECK_IN_OUT", instanceIndex: body.instanceIndex }
+    const direction = body.direction ?? null
+    if (direction !== null && direction !== "in" && direction !== "out") {
+      throw new HttpError('"direction" must be "in" or "out".', 400)
+    }
+    return {
+      action: "CHECK_IN_OUT",
+      instanceIndex: body.instanceIndex,
+      direction,
+    }
   }
 
   if (body.action === "FIND_TIMESHEETS") {
@@ -1146,6 +1159,9 @@ async function findTask(
 }
 
 /** Looks each reference up in instance 1, then the still missing ones in instance 2. */
+/** Task searches sent to one instance at a time, to spare its workers. */
+const SEARCH_CONCURRENCY = 10
+
 async function searchTasks(
   instances: OdooInstanceSettings[],
   taskRefs: string[]
@@ -1153,21 +1169,42 @@ async function searchTasks(
   const getSession = createSessionPool(instances)
   const matches = new Map<string, TaskMatch>()
   let pending = taskRefs
+  // An instance that fails (down, expired certificate) doesn't stop the
+  // search in the others. Its error is raised only for references found
+  // nowhere else: "not found" would then be a guess.
+  let failure: unknown = null
 
   for (const { index } of instances) {
     if (pending.length === 0) {
       break
     }
-    const session = await getSession(index)
-    const found = await Promise.all(
-      pending.map((taskRef) => findTask(session, index, taskRef))
-    )
-    found.forEach((match, position) => {
-      if (match !== null) {
-        matches.set(pending[position], match)
-      }
-    })
+    let session: OdooSession
+    try {
+      session = await getSession(index)
+    } catch (error) {
+      failure ??= error
+      continue
+    }
+    for (let start = 0; start < pending.length; start += SEARCH_CONCURRENCY) {
+      const batch = pending.slice(start, start + SEARCH_CONCURRENCY)
+      const found = await Promise.all(
+        batch.map((taskRef) =>
+          findTask(session, index, taskRef).catch((error: unknown) => {
+            failure ??= error
+            return null
+          })
+        )
+      )
+      found.forEach((match, position) => {
+        if (match !== null) {
+          matches.set(batch[position], match)
+        }
+      })
+    }
     pending = pending.filter((taskRef) => !matches.has(taskRef))
+  }
+  if (pending.length > 0 && failure !== null) {
+    throw failure
   }
 
   return taskRefs.map((taskRef) => {
@@ -1321,49 +1358,63 @@ async function findTimesheets(
   const wanted = new Set(lookups.map(lookupKey))
   const timesheets: LoggedTimesheet[] = []
 
-  for (const index of new Set(lookups.map((lookup) => lookup.instanceIndex))) {
+  const indexes = [...new Set(lookups.map((lookup) => lookup.instanceIndex))]
+  // One instance failing doesn't hide the lines of the others; its error is
+  // raised only when no instance answered.
+  let failure: unknown = null
+  let answered = 0
+
+  for (const index of indexes) {
     const instanceLookups = lookups.filter((l) => l.instanceIndex === index)
     const taskIds = [...new Set(instanceLookups.map((l) => l.taskId))]
     const dates = instanceLookups.map((l) => l.date).sort()
-    const session = await getSession(index)
+    try {
+      const session = await getSession(index)
 
-    // One query per instance: every task over the whole date range, then
-    // only the exact task and day pairs are kept.
-    const records = await executeKw(
-      session,
-      "account.analytic.line",
-      "search_read",
-      [
+      // One query per instance: every task over the whole date range, then
+      // only the exact task and day pairs are kept.
+      const records = await executeKw(
+        session,
+        "account.analytic.line",
+        "search_read",
         [
-          ["user_id", "=", session.uid],
-          ["task_id", "in", taskIds],
-          ["date", ">=", dates[0]],
-          ["date", "<=", dates[dates.length - 1]],
+          [
+            ["user_id", "=", session.uid],
+            ["task_id", "in", taskIds],
+            ["date", ">=", dates[0]],
+            ["date", "<=", dates[dates.length - 1]],
+          ],
         ],
-      ],
-      {
-        fields: await timesheetFields(session, [
-          "task_id",
-          "date",
-          "unit_amount",
-          "name",
-        ]),
-        limit: TIMESHEET_LOOKUP_LIMIT,
-      }
-    )
-    if (!Array.isArray(records)) {
-      throw new HttpError(
-        `${session.connection.label} returned an invalid timesheet list.`,
-        502
+        {
+          fields: await timesheetFields(session, [
+            "task_id",
+            "date",
+            "unit_amount",
+            "name",
+          ]),
+          limit: TIMESHEET_LOOKUP_LIMIT,
+        }
       )
-    }
-
-    for (const record of records) {
-      const timesheet = readLoggedTimesheet(record, index)
-      if (timesheet !== null && wanted.has(lookupKey(timesheet))) {
-        timesheets.push(timesheet)
+      if (!Array.isArray(records)) {
+        throw new HttpError(
+          `${session.connection.label} returned an invalid timesheet list.`,
+          502
+        )
       }
+
+      for (const record of records) {
+        const timesheet = readLoggedTimesheet(record, index)
+        if (timesheet !== null && wanted.has(lookupKey(timesheet))) {
+          timesheets.push(timesheet)
+        }
+      }
+      answered += 1
+    } catch (error) {
+      failure ??= error
     }
+  }
+  if (answered === 0 && failure !== null) {
+    throw failure
   }
   return timesheets
 }
@@ -3251,11 +3302,17 @@ function getAttendance(
   )
 }
 
-/** Checks the user in, or out when an attendance is open. */
+/**
+ * Checks the user in, or out when an attendance is open. With a direction,
+ * nothing is done when Odoo is already in that state (a punch from Odoo or
+ * another device since the app last read it, or two buttons clicked at
+ * once): a toggle would undo it.
+ */
 async function checkInOut(
   instances: OdooInstanceSettings[],
-  instanceIndex: InstanceIndex
-): Promise<{ openSince: string | null }> {
+  instanceIndex: InstanceIndex,
+  direction: "in" | "out" | null
+): Promise<{ openSince: string | null; changed: boolean }> {
   const session = await createSessionPool(instances)(instanceIndex)
   const employeeId = await readOwnEmployeeId(session)
   if (employeeId === null) {
@@ -3264,9 +3321,15 @@ async function checkInOut(
       409
     )
   }
+  if (direction !== null) {
+    const current = await readOpenAttendance(session, employeeId)
+    if ((current !== null) === (direction === "in")) {
+      return { openSince: current?.checkIn ?? null, changed: false }
+    }
+  }
   await asConflict(toggleAttendance(session, employeeId))
   const open = await readOpenAttendance(session, employeeId)
-  return { openSince: open?.checkIn ?? null }
+  return { openSince: open?.checkIn ?? null, changed: true }
 }
 
 /* ------------------------------------------------------------------ */
@@ -3337,7 +3400,11 @@ serveJson("odoo-gateway", {
       case "GET_ATTENDANCE":
         return { instances: await getAttendance(instances, gatewayRequest) }
       case "CHECK_IN_OUT":
-        return await checkInOut(instances, gatewayRequest.instanceIndex)
+        return await checkInOut(
+          instances,
+          gatewayRequest.instanceIndex,
+          gatewayRequest.direction
+        )
       case "LIST_TASKS":
         return { instances: await listTasks(instances, gatewayRequest) }
       case "LIST_ASSIGNEES":

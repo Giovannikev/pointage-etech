@@ -423,6 +423,8 @@
     "checkOut": "Pointer le départ",
     "checkedIn": "Arrivée pointée",
     "checkedOut": "Départ pointé",
+    "alreadyCheckedIn": "Votre arrivée était déjà pointée : rien n'a changé.",
+    "alreadyCheckedOut": "Votre départ était déjà pointé : rien n'a changé.",
     "checkInError": "Impossible d'enregistrer la présence",
     "openOdoo": "Ouvrir Odoo",
     "periodTotal": "Heures de présence sur la période",

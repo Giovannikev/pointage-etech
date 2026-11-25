@@ -68,7 +68,7 @@ function WidgetPanel({
       <Button
         variant={isIn ? "outline" : "default"}
         disabled={isSaving}
-        onClick={() => void toggle()}
+        onClick={() => void toggle(isIn)}
       >
         {isSaving ? (
           <Loader2Icon className="animate-spin" />

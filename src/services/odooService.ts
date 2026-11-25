@@ -1309,14 +1309,23 @@ export function onAttendanceChanged(listener: () => void): () => void {
   return () => window.removeEventListener(ATTENDANCE_CHANGED, listener)
 }
 
-/** Checks in, or out when checked in; resolves with the new open check-in. */
+/**
+ * Checks in or out; resolves with the open check-in afterwards, and whether
+ * Odoo changed (false when it was already in that state).
+ */
 export async function checkInOut(
-  instanceIndex: OdooInstanceIndex
-): Promise<string | null> {
+  instanceIndex: OdooInstanceIndex,
+  direction: "in" | "out"
+): Promise<{ openSince: string | null; changed: boolean }> {
   try {
-    const data = await invokeGateway({ action: "CHECK_IN_OUT", instanceIndex })
+    const data = await invokeGateway({
+      action: "CHECK_IN_OUT",
+      instanceIndex,
+      direction,
+    })
     if (isRecord(data) && isNullableString(data.openSince)) {
-      return data.openSince
+      // An older gateway doesn't say: it always toggles.
+      return { openSince: data.openSince, changed: data.changed !== false }
     }
     throw new InvalidResponseError(GATEWAY_FUNCTION)
   } finally {

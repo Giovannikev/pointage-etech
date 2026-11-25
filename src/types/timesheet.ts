@@ -616,6 +616,8 @@ export interface GetAttendanceRequest {
 export interface CheckInOutRequest {
   action: "CHECK_IN_OUT"
   instanceIndex: OdooInstanceIndex
+  /** The punch asked for: Odoo already in that state changes nothing. */
+  direction: "in" | "out"
 }
 
 export interface PostTaskNoteResponse {
