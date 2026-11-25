@@ -391,11 +391,31 @@ The front end splits larger batches into several requests. Shared server code
 
 ## Tests
 
-`pnpm test` runs the Vitest suites (`src/**/*.test.ts`) on the pure logic:
-commit parsing, Odoo reconciliation, the Kanban board, the history and its
-grid, the hours estimate, the cache and the URL parameters. The GitHub
-Actions workflow (`.github/workflows/ci.yml`) runs the type check, lint,
-tests and build on every push, and type-checks the Edge Functions with Deno.
+`pnpm test` runs the Vitest suites (`src/**/*.test.ts` and
+`scripts/**/*.test.ts`) on the pure logic: commit parsing, Odoo
+reconciliation, the Kanban board, the history and its grid, the hours
+estimate, the cache, the URL parameters, the attendance plan and the
+settings checks. The GitHub Actions workflow (`.github/workflows/ci.yml`)
+runs the type check, lint, tests and build on every push and pull request,
+and type-checks and tests the Edge Functions with Deno.
+
+## Deploying the Edge Functions automatically
+
+On every push to `main` whose checks pass, the workflow deploys the four
+Edge Functions with the Supabase CLI: `user-settings`, `github-commits` and
+`odoo-gateway` with JWT verification, `auto-attendance` without it (pg_cron
+calls it with `CRON_SECRET`). Nothing has to be pasted in the dashboard.
+
+It needs two repository secrets, in GitHub **Settings → Secrets and
+variables → Actions**:
+
+| Secret                  | Value                                                                 |
+| ----------------------- | --------------------------------------------------------------------- |
+| `SUPABASE_ACCESS_TOKEN` | A personal access token from supabase.com → Account → Access Tokens  |
+| `SUPABASE_PROJECT_REF`  | The project id, the `<ref>` in `https://<ref>.supabase.co`            |
+
+Without them the deploy job only warns, and the functions are deployed by
+hand as above. Migrations (`supabase db push`) stay a manual step.
 
 ## Languages
 

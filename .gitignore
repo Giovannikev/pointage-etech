@@ -25,3 +25,6 @@ public/version.json
 *.njsproj
 *.sln
 *.sw?
+
+# Single-file builds of the Edge Functions (scripts/bundle-functions.py)
+dist-functions
